@@ -1,0 +1,3 @@
+(function() {var implementors = {};
+implementors["lrlex"] = [{"text":"impl&lt;'lexer, 'input: 'lexer, StorageT:&nbsp;Copy + Eq + Hash + PrimInt + Unsigned&gt; Lexer&lt;StorageT&gt; for LRNonStreamingLexer&lt;'lexer, 'input, StorageT&gt;","synthetic":false,"types":[]}];
+if (window.register_implementors) {window.register_implementors(implementors);} else {window.pending_implementors = implementors;}})()

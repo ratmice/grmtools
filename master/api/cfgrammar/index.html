@@ -1,0 +1,50 @@
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="API documentation for the Rust `cfgrammar` crate."><meta name="keywords" content="rust, rustlang, rust-lang, cfgrammar"><title>cfgrammar - Rust</title><link rel="stylesheet" type="text/css" href="../normalize.css"><link rel="stylesheet" type="text/css" href="../rustdoc.css" id="mainThemeStyle"><link rel="stylesheet" type="text/css" href="../light.css"  id="themeStyle"><link rel="stylesheet" type="text/css" href="../dark.css" disabled ><link rel="stylesheet" type="text/css" href="../ayu.css" disabled ><script src="../storage.js"></script><noscript><link rel="stylesheet" href="../noscript.css"></noscript><link rel="shortcut icon" href="../favicon.ico"><style type="text/css">#crate-search{background-image:url("../down-arrow.svg");}</style></head><body class="rustdoc mod"><!--[if lte IE 8]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="sidebar"><div class="sidebar-menu">&#9776;</div><a href='../cfgrammar/index.html'><div class='logo-container rust-logo'><img src='../rust-logo.png' alt='logo'></div></a><p class='location'>Crate cfgrammar</p><div class='block version'><p>Version 0.9.1</p></div><div class="sidebar-elems"><a id='all-types' href='all.html'><p>See all cfgrammar's items</p></a><div class="block items"><ul><li><a href="#modules">Modules</a></li><li><a href="#structs">Structs</a></li><li><a href="#enums">Enums</a></li></ul></div><p class='location'></p><script>window.sidebarCurrent = {name: 'cfgrammar', ty: 'mod', relpath: '../'};</script></div></nav><div class="theme-picker"><button id="theme-picker" aria-label="Pick another theme!"><img src="../brush.svg" width="18" alt="Pick another theme!"></button><div id="theme-choices"></div></div><script src="../theme.js"></script><nav class="sub"><form class="search-form"><div class="search-container"><div><select id="crate-search"><option value="All crates">All crates</option></select><input class="search-input" name="search" disabled autocomplete="off" spellcheck="false" placeholder="Click or press ‘S’ to search, ‘?’ for more options…" type="search"></div><span class="help-button">?</span>
+                <a id="settings-menu" href="../settings.html"><img src="../wheel.svg" width="18" alt="Change settings"></a></div></form></nav><section id="main" class="content"><h1 class='fqn'><span class='out-of-band'><span id='render-detail'><a id="toggle-all-docs" href="javascript:void(0)" title="collapse all docs">[<span class='inner'>&#x2212;</span>]</a></span><a class='srclink' href='../src/cfgrammar/mod.rs.html#1-64' title='goto source code'>[src]</a></span><span class='in-band'>Crate <a class="mod" href=''>cfgrammar</a></span></h1><div class='docblock'><p>A library for manipulating Context Free Grammars (CFG). It is impractical to fully homogenise
+all the types of grammars out there, so the aim is for different grammar types
+to have completely separate implementations. Code that wants to be generic over more than one
+grammar type can then use an &quot;adapter&quot; to homogenise the particular grammar types of interest.
+Currently this is a little academic, since only Yacc-style grammars are supported (albeit
+several variants of Yacc grammars).</p>
+<p>Unfortunately, CFG terminology is something of a mess. Some people use different terms for the
+same concept interchangeably; some use different terms to convey subtle differences of meaning
+(but without complete uniformity). &quot;Token&quot;, &quot;terminal&quot;, and &quot;lexeme&quot; are examples of this: they
+are synonyms in some tools and papers, but not in others.</p>
+<p>In order to make this library somewhat coherent, we therefore use some basic terminology
+guidelines for major concepts (acknowledging that this will cause clashes with some grammar
+types).</p>
+<ul>
+<li>A <em>grammar</em> is an ordered sequence of <em>productions</em>.</li>
+<li>A <em>production</em> is an ordered sequence of <em>symbols</em>.</li>
+<li>A <em>rule</em> maps a name to one or more productions.</li>
+<li>A <em>token</em> is the name of a syntactic element.</li>
+</ul>
+<p>For example, in the following Yacc grammar:</p>
+<p>R1: &quot;a&quot; &quot;b&quot; | R2;
+R2: &quot;c&quot;;</p>
+<p>the following statements are true:</p>
+<ul>
+<li>There are 3 productions. 1: [&quot;a&quot;, &quot;b&quot;] 2: [&quot;R2&quot;] 3: [&quot;c&quot;]`</li>
+<li>There are two rules: R1 and R2. The mapping to productions is {R1: {1, 2}, R2: {3}}</li>
+<li>There are three tokens: a, b, and c.</li>
+</ul>
+<p>cfgrammar makes the following guarantees about grammars:</p>
+<ul>
+<li>Productions are numbered from <code>0</code> to <code>prods_len() - 1</code> (inclusive).</li>
+<li>Rules are numbered from <code>0</code> to <code>rules_len() - 1</code> (inclusive).</li>
+<li>Tokens are numbered from <code>0</code> to <code>toks_len() - 1</code> (inclusive).</li>
+<li>The StorageT type used to store productions, rules, and token indices can be infallibly
+converted into usize (see <a href="struct.TIdx.html"><code>TIdx</code></a> and friends for more details).</li>
+</ul>
+<p>For most current uses, the main function to investigate is
+<a href="yacc/grammar/struct.YaccGrammar.html#method.new"><code>YaccGrammar::new()</code></a> and/or
+<a href="yacc/grammar/struct.YaccGrammar.html#method.new_with_storaget"><code>YaccGrammar::new_with_storaget()</code></a>
+which take as input a Yacc grammar.</p>
+</div><h2 id='modules' class='section-header'><a href="#modules">Modules</a></h2>
+<table><tr class='module-item'><td><a class="mod" href="yacc/index.html" title='cfgrammar::yacc mod'>yacc</a></td><td class='docblock-short'></td></tr></table><h2 id='structs' class='section-header'><a href="#structs">Structs</a></h2>
+<table><tr class='module-item'><td><a class="struct" href="struct.PIdx.html" title='cfgrammar::PIdx struct'>PIdx</a></td><td class='docblock-short'><p>A type specifically for production indices (e.g. a rule <code>E::=A|B</code> would
+have two productions for the single rule <code>E</code>).</p>
+</td></tr><tr class='module-item'><td><a class="struct" href="struct.RIdx.html" title='cfgrammar::RIdx struct'>RIdx</a></td><td class='docblock-short'><p>A type specifically for rule indices.</p>
+</td></tr><tr class='module-item'><td><a class="struct" href="struct.SIdx.html" title='cfgrammar::SIdx struct'>SIdx</a></td><td class='docblock-short'><p>A type specifically for symbol indices (within a production).</p>
+</td></tr><tr class='module-item'><td><a class="struct" href="struct.TIdx.html" title='cfgrammar::TIdx struct'>TIdx</a></td><td class='docblock-short'><p>A type specifically for token indices.</p>
+</td></tr></table><h2 id='enums' class='section-header'><a href="#enums">Enums</a></h2>
+<table><tr class='module-item'><td><a class="enum" href="enum.Symbol.html" title='cfgrammar::Symbol enum'>Symbol</a></td><td class='docblock-short'></td></tr></table></section><section id="search" class="content hidden"></section><section class="footer"></section><script>window.rootPath = "../";window.currentCrate = "cfgrammar";</script><script src="../main.js"></script><script defer src="../search-index.js"></script></body></html>
