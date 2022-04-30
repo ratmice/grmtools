@@ -256,6 +256,61 @@ impl<
         }
         LRNonStreamingLexer::new(s, lexemes, newlines)
     }
+
+    #[cfg(feature = "rope")]
+    pub fn rope_lexer<'lexer, 'input: 'lexer>(
+        &'lexer self,
+        rope: &'input ropey::Rope,
+    ) -> LRNonStreamingRopeLexer<'lexer, 'input, LexemeT, StorageT> {
+        // This is just slightly modified from lexer
+        // the type of input has changed, bytes_slice is used instead of s[..],
+        // and the newlines vec was removed.
+        let mut lexemes = vec![];
+        let mut i = 0;
+        while i < rope.len_bytes() {
+            let old_i = i;
+            let mut longest = 0; // Length of the longest match
+            let mut longest_ridx = 0; // This is only valid iff longest != 0
+            for (ridx, r) in self.iter_rules().enumerate() {
+                // This works but appears to be terribly inefficient,
+                // when rope.byte_slice ends up spanning chunks
+                // which this iteration always will if the rope contains
+                // more than a single chunk.
+                //
+                // So we are still better off cloning the entire string or using
+                // to_string() outside the loop.
+                let cow = std::borrow::Cow::<str>::from(rope.byte_slice(old_i..));
+                if let Some(m) = r.re.find(cow.as_ref()) {
+                    let len = m.end();
+                    // Note that by using ">", we implicitly prefer an earlier over a later rule, if
+                    // both match an input of the same length.
+                    if len > longest {
+                        longest = len;
+                        longest_ridx = ridx;
+                    }
+                }
+            }
+            if longest > 0 {
+                let r = self.get_rule(longest_ridx).unwrap();
+                if r.name.is_some() {
+                    match r.tok_id {
+                        Some(tok_id) => {
+                            lexemes.push(Ok(Lexeme::new(tok_id, old_i, longest)));
+                        }
+                        None => {
+                            lexemes.push(Err(LexError::new(Span::new(old_i, old_i))));
+                            break;
+                        }
+                    }
+                }
+                i += longest;
+            } else {
+                lexemes.push(Err(LexError::new(Span::new(old_i, old_i))));
+                break;
+            }
+        }
+        LRNonStreamingRopeLexer::new(rope, lexemes)
+    }
 }
 
 /// An `LRNonStreamingLexer` holds a reference to a string and can lex it into [lrpar::Lexeme]s.
@@ -386,6 +441,102 @@ impl<
         (
             lc_char(self, span.start(), self.s),
             lc_char(self, span.end(), self.s),
+        )
+    }
+}
+
+#[cfg(feature = "rope")]
+pub struct LRNonStreamingRopeLexer<'lexer, 'input: 'lexer, LexemeT, StorageT: fmt::Debug> {
+    rope: &'input ropey::Rope,
+    lexemes: Vec<Result<LexemeT, LexError>>,
+    /// A sorted list of the byte index of the start of the following line. i.e. for the input
+    /// string `" a\nb\n  c d"` this will contain `[3, 5]`.
+    phantom: PhantomData<(&'lexer (), StorageT)>,
+}
+
+#[cfg(feature = "rope")]
+impl<
+        'lexer,
+        'input: 'lexer,
+        LexemeT: Lexeme<StorageT>,
+        StorageT: Copy + Eq + fmt::Debug + Hash + PrimInt + TryFrom<usize> + Unsigned,
+    > LRNonStreamingRopeLexer<'lexer, 'input, LexemeT, StorageT>
+{
+    /// Create a new `LRNonStreamingLexer` that read in: the input `s`; and derived `lexemes` and
+    /// `newlines`. The `newlines` `Vec<usize>` is a sorted list of the byte index of the start of
+    /// the following line. i.e. for the input string `" a\nb\n  c d"` the `Vec` should contain
+    /// `[3, 5]`.
+    ///
+    /// Note that if one or more lexemes or newlines was not created from `s`, subsequent calls to
+    /// the `LRNonStreamingLexer` may cause `panic`s.
+    pub fn new(
+        rope: &'input ropey::Rope,
+        lexemes: Vec<Result<LexemeT, LexError>>,
+    ) -> LRNonStreamingRopeLexer<'lexer, 'input, LexemeT, StorageT> {
+        LRNonStreamingRopeLexer {
+            rope,
+            lexemes,
+            phantom: PhantomData,
+        }
+    }
+}
+
+#[cfg(feature = "rope")]
+impl<
+        'lexer,
+        'input: 'lexer,
+        LexemeT: Lexeme<StorageT>,
+        StorageT: Copy + fmt::Debug + Eq + Hash + PrimInt + Unsigned,
+    > Lexer<LexemeT, StorageT> for LRNonStreamingRopeLexer<'lexer, 'input, LexemeT, StorageT>
+{
+    fn iter<'a>(&'a self) -> Box<dyn Iterator<Item = Result<LexemeT, LexError>> + 'a> {
+        Box::new(self.lexemes.iter().cloned())
+    }
+}
+
+#[cfg(feature = "rope")]
+impl<
+        'lexer,
+        'input: 'lexer,
+        LexemeT: Lexeme<StorageT>,
+        StorageT: Copy + Eq + fmt::Debug + Hash + PrimInt + Unsigned,
+    > NonStreamingLexer<'input, LexemeT, StorageT>
+    for LRNonStreamingRopeLexer<'lexer, 'input, LexemeT, StorageT>
+{
+    fn span_str(&self, span: Span) -> &'input str {
+        self.rope
+            .byte_slice(span.start()..span.end())
+            .as_str()
+            .unwrap()
+    }
+
+    fn span_lines_str(&self, span: Span) -> &'input str {
+        let start_line_num = self.rope.byte_to_line(span.start());
+        let end_line_num = self.rope.byte_to_line(span.end());
+        let end_line = self.rope.line(end_line_num);
+        self.rope
+            .byte_slice(
+                self.rope.line_to_byte(start_line_num)
+                    ..self.rope.line_to_byte(end_line_num) + end_line.len_bytes(),
+            )
+            .as_str()
+            .unwrap()
+    }
+
+    fn line_col(&self, span: Span) -> ((usize, usize), (usize, usize)) {
+        (
+            {
+                let start_line = self.rope.byte_to_line(span.start());
+                let start_char = self.rope.byte_to_char(span.start());
+                let line_char = self.rope.line_to_char(start_line);
+                (start_line, start_char - line_char)
+            },
+            {
+                let end_line = self.rope.byte_to_line(span.end());
+                let end_char = self.rope.byte_to_char(span.end());
+                let line_char = self.rope.line_to_char(end_line);
+                (end_line, end_char - line_char)
+            },
         )
     }
 }
