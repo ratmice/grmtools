@@ -12,7 +12,7 @@ use super::{
     parser::{YaccGrammarResult, YaccParser},
     YaccKind,
 };
-use crate::{PIdx, RIdx, SIdx, Span, Symbol, TIdx};
+use crate::{analysis::Analysis, PIdx, RIdx, SIdx, Span, Symbol, TIdx};
 
 const START_RULE: &str = "^";
 const IMPLICIT_RULE: &str = "~";
@@ -111,16 +111,35 @@ where
     /// though the actual name is a fresh name that is guaranteed to be unique) that references the
     /// user defined start rule.
     pub fn new_with_storaget(yacc_kind: YaccKind, s: &str) -> YaccGrammarResult<Self> {
+        Self::_new_analysis_with_storaget(yacc_kind, s, None)
+    }
+
+    /// Equivalent to [YaccGrammar::new_with_storaget] while performing a given [analysis::Analysis].
+    pub fn new_analysis_with_storaget(
+        yacc_kind: YaccKind,
+        s: &str,
+        analysis: &mut dyn Analysis<ast::GrammarAST>,
+    ) -> YaccGrammarResult<Self> {
+        Self::_new_analysis_with_storaget(yacc_kind, s, Some(analysis))
+    }
+
+    fn _new_analysis_with_storaget(
+        yacc_kind: YaccKind,
+        s: &str,
+        a: Option<&mut dyn Analysis<ast::GrammarAST>>,
+    ) -> YaccGrammarResult<Self> {
         let ast = match yacc_kind {
             YaccKind::Original(_) | YaccKind::Grmtools | YaccKind::Eco => {
                 let mut yp = YaccParser::new(yacc_kind, s.to_string());
-                yp.parse()?;
+                let mut errs = Vec::new();
+                let _ = yp.parse().map_err(|e| errs.extend(e));
                 let mut ast = yp.ast();
-                let r = ast.complete_and_validate();
-                // TODO emit warnings.
-                let _ = ast.unused_symbols().map(|sym_idx| sym_idx.symbol(&ast));
-                if r.is_err() {
-                    return Err(vec![r.unwrap_err()]);
+                let _ = ast.complete_and_validate().map_err(|e| errs.push(e));
+                if let Some(a) = a {
+                    a.analyze(&ast)
+                }
+                if !errs.is_empty() {
+                    return Err(errs);
                 }
 
                 ast
