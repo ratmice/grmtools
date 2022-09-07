@@ -16,8 +16,11 @@ use std::{
     sync::Mutex,
 };
 
+use std::io::Read;
+
 use bincode::{deserialize, serialize_into};
 use cfgrammar::{
+    analysis::Analysis,
     analysis::YaccGrammarWarningAnalysis,
     newlinecache::NewlineCache,
     yacc::{YaccGrammar, YaccKind, YaccOriginalActionKind},
@@ -49,7 +52,9 @@ lazy_static! {
 }
 
 struct CTConflictsError<StorageT: Eq + Hash> {
-    stable: StateTable<StorageT>,
+    analysis: CTConflictAnalysis,
+    // This is not here for any purpose other than type compatibility.
+    phantom_storage: PhantomData<StorageT>,
 }
 
 impl<StorageT> fmt::Display for CTConflictsError<StorageT>
@@ -58,12 +63,11 @@ where
     usize: AsPrimitive<StorageT>,
 {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        let conflicts = self.stable.conflicts().unwrap();
         write!(
             f,
             "CTConflictsError{{{} Reduce/Reduce, {} Shift/Reduce}}",
-            conflicts.rr_len(),
-            conflicts.sr_len()
+            self.analysis.rr_len().unwrap(),
+            self.analysis.sr_len().unwrap()
         )
     }
 }
@@ -74,13 +78,7 @@ where
     usize: AsPrimitive<StorageT>,
 {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        let conflicts = self.stable.conflicts().unwrap();
-        write!(
-            f,
-            "CTConflictsError{{{} Reduce/Reduce, {} Shift/Reduce}}",
-            conflicts.rr_len(),
-            conflicts.sr_len()
-        )
+        write!(f, "{}", self)
     }
 }
 
@@ -153,6 +151,13 @@ where
     warnings_are_errors: bool,
     visibility: Visibility,
     phantom: PhantomData<(LexemeT, StorageT)>,
+}
+
+pub struct CTAnalysisBuilder<'a, LexemeT, StorageT = u32>
+where
+    StorageT: Eq + Hash,
+{
+    pb: CTParserBuilder<'a, LexemeT, StorageT>,
 }
 
 impl<'a, LexemeT, StorageT> CTParserBuilder<'a, LexemeT, StorageT>
@@ -359,6 +364,72 @@ where
     ///
     /// If `StorageT` is not big enough to index the grammar's tokens, rules, or productions.
     pub fn build(self) -> Result<CTParser<StorageT>, Box<dyn Error>> {
+        let mut inc = String::new();
+        // At this point we move `self` into `read`, self will move about during this
+        // function but will remain accessible via the a field `pb` on various types
+        let read = self.read_grammar_for_analysis(&mut inc)?;
+        let mut analysis = YaccGrammarWarningAnalysis::new(&read.fmeta.grmp);
+        fn fmt_spanned<T: Spanned>(x: &T, line_cache: &NewlineCache, src: &str) -> String {
+            if let Some((line, column)) =
+                line_cache.byte_to_line_num_and_col_num(src, x.spans()[0].start())
+            {
+                format!("{} at line {line} column {column}", x)
+            } else {
+                format!("{}", x)
+            }
+        }
+
+        // `read` has moved into analyzed.
+        let analyzed = read.analyze_grammar(&mut analysis, &inc);
+        match analyzed {
+            Err(errs) => {
+                let mut line_cache = NewlineCache::new();
+                line_cache.feed(&inc);
+                Err(ErrorString(
+                    errs.iter()
+                        .map(|e| fmt_spanned(e, &line_cache, &inc))
+                        .chain(analysis.iter().map(|w| fmt_spanned(w, &line_cache, &inc)))
+                        .collect::<Vec<_>>()
+                        .join("\n"),
+                ))?
+            }
+            Ok(analyzed) => {
+                if analyzed.pb.warnings_are_errors && !analysis.is_empty() {
+                    let mut line_cache = NewlineCache::new();
+                    line_cache.feed(&inc);
+                    Err(ErrorString(
+                        analysis
+                            .iter()
+                            .map(|w| fmt_spanned(w, &line_cache, &inc))
+                            .collect::<Vec<_>>()
+                            .join("\n"),
+                    ))?;
+                }
+                let mut ca = CTConflictAnalysis::new();
+                // `analyzed` has moved into `conflict_analyzed`.
+                let conflict_analyzed = analyzed.build_table()?.analyze_table(&mut ca);
+                if conflict_analyzed.pb.error_on_conflicts && ca.unexpected_conflicts() {
+                    Err(CTConflictsError {
+                        analysis: ca,
+                        phantom_storage: PhantomData,
+                    })?
+                }
+                conflict_analyzed.write_parser()
+            }
+        }
+    }
+
+    pub fn build_for_analysis(self) -> CTAnalysisBuilder<'a, LexemeT, StorageT> {
+        CTAnalysisBuilder { pb: self }
+    }
+
+    /// Clears `inc`, reading a grammar source into it.
+    /// Returns a CTGramarAnalyzer
+    pub(crate) fn read_grammar_for_analysis(
+        self,
+        inc: &mut String,
+    ) -> Result<CTGrammarAnalyzer<'a, LexemeT, StorageT>, Box<dyn Error>> {
+        inc.clear();
         let grmp = self
             .grammar_path
             .as_ref()
@@ -382,120 +453,15 @@ where
             lk.insert(outp.clone());
         }
 
-        let inc = read_to_string(grmp).unwrap();
-        let mut analysis = YaccGrammarWarningAnalysis::new(grmp);
-        fn fmt_spanned<T: Spanned>(x: &T, line_cache: &NewlineCache, src: &str) -> String {
-            if let Some((line, column)) =
-                line_cache.byte_to_line_num_and_col_num(src, x.spans()[0].start())
-            {
-                format!("{} at line {line} column {column}", x)
-            } else {
-                format!("{}", x)
-            }
-        }
-        let grm = YaccGrammar::<StorageT>::new_analysis_with_storaget(yk, &inc, &mut analysis)
-            .map_err(|errs| {
-                let mut line_cache = NewlineCache::new();
-                line_cache.feed(&inc);
-                errs.iter()
-                    .map(|e| fmt_spanned(e, &line_cache, &inc))
-                    .chain(analysis.iter().map(|w| fmt_spanned(w, &line_cache, &inc)))
-                    .collect::<Vec<_>>()
-                    .join("\n")
-            })?;
-
-        if self.warnings_are_errors && !analysis.is_empty() {
-            let mut line_cache = NewlineCache::new();
-            line_cache.feed(&inc);
-            Err(ErrorString(analysis
-                .iter()
-                .map(|w| fmt_spanned(w, &line_cache, &inc))
-                .collect::<Vec<_>>()
-                .join("\n")))?;
-        }
-
-        let rule_ids = grm
-            .tokens_map()
-            .iter()
-            .map(|(&n, &i)| (n.to_owned(), i.as_storaget()))
-            .collect::<HashMap<_, _>>();
-        let cache = self.rebuild_cache(&grm);
-
-        // We don't need to go through the full rigmarole of generating an output file if all of
-        // the following are true: the output file exists; it is newer than the input file; and the
-        // cache hasn't changed. The last of these might be surprising, but it's vital: we don't
-        // know, for example, what the IDs map might be from one run to the next, and it might
-        // change for reasons beyond lrpar's control. If it does change, that means that the lexer
-        // and lrpar would get out of sync, so we have to play it safe and regenerate in such
-        // cases.
-        if let Ok(ref inmd) = fs::metadata(grmp) {
-            if let Ok(ref out_rs_md) = fs::metadata(outp) {
-                if FileTime::from_last_modification_time(out_rs_md)
-                    > FileTime::from_last_modification_time(inmd)
-                {
-                    if let Ok(outc) = read_to_string(outp) {
-                        if outc.contains(&cache) {
-                            return Ok(CTParser {
-                                regenerated: false,
-                                rule_ids,
-                                conflicts: None,
-                            });
-                        }
-                    }
-                }
-            }
-        }
-
-        // At this point, we know we're going to generate fresh output; however, if something goes
-        // wrong in the process between now and us writing /out/blah.rs, rustc thinks that
-        // everything's gone swimmingly (even if build.rs errored!), and tries to carry on
-        // compilation, leading to weird errors. We therefore delete /out/blah.rs at this point,
-        // which means, at worse, the user gets a "file not found" error from rustc (which is less
-        // confusing than the alternatives).
-        fs::remove_file(outp).ok();
-
-        let (sgraph, stable) = from_yacc(&grm, Minimiser::Pager)?;
-        if self.error_on_conflicts {
-            if let Some(c) = stable.conflicts() {
-                match (grm.expect(), grm.expectrr()) {
-                    (Some(i), Some(j)) if i == c.sr_len() && j == c.rr_len() => (),
-                    (Some(i), None) if i == c.sr_len() && 0 == c.rr_len() => (),
-                    (None, Some(j)) if 0 == c.sr_len() && j == c.rr_len() => (),
-                    (None, None) if 0 == c.rr_len() && 0 == c.sr_len() => (),
-                    _ => return Err(Box::new(CTConflictsError { stable })),
-                }
-            }
-        }
-
-        let mod_name = match self.mod_name {
-            Some(s) => s.to_owned(),
-            None => {
-                // The user hasn't specified a module name, so we create one automatically: what we
-                // do is strip off all the filename extensions (note that it's likely that inp ends
-                // with `y.rs`, so we potentially have to strip off more than one extension) and
-                // then add `_y` to the end.
-                let mut stem = grmp.to_str().unwrap();
-                loop {
-                    let new_stem = Path::new(stem).file_stem().unwrap().to_str().unwrap();
-                    if stem == new_stem {
-                        break;
-                    }
-                    stem = new_stem;
-                }
-                format!("{}_y", stem)
-            }
-        };
-
-        self.output_file(&grm, &stable, &mod_name, outp, &cache)?;
-        let conflicts = if stable.conflicts().is_some() {
-            Some((grm, sgraph, stable))
-        } else {
-            None
-        };
-        Ok(CTParser {
-            regenerated: true,
-            rule_ids,
-            conflicts,
+        let mut file = File::open(&grmp)?;
+        file.read_to_string(inc)?;
+        Ok(CTGrammarAnalyzer {
+            fmeta: FileMeta {
+                grmp: grmp.to_owned(),
+                outp: outp.to_owned(),
+                yk,
+            },
+            pb: self,
         })
     }
 
@@ -1148,6 +1114,266 @@ where
     }
 }
 
+impl<'a, LexemeT, StorageT> CTAnalysisBuilder<'a, LexemeT, StorageT>
+where
+    LexemeT: Lexeme<StorageT>,
+    StorageT: 'static + Debug + Hash + PrimInt + Serialize + Unsigned,
+    usize: AsPrimitive<StorageT>,
+{
+    pub fn read_grammar(
+        self,
+        inc: &mut String,
+    ) -> Result<CTGrammarAnalyzer<'a, LexemeT, StorageT>, Box<dyn Error>> {
+        self.pb.read_grammar_for_analysis(inc)
+    }
+}
+
+pub struct CTGrammarAnalyzer<'a, LexemeT, StorageT>
+where
+    StorageT: Eq + Hash,
+{
+    fmeta: FileMeta,
+    pb: CTParserBuilder<'a, LexemeT, StorageT>,
+}
+
+struct FileMeta {
+    grmp: PathBuf,
+    outp: PathBuf,
+    yk: YaccKind,
+}
+
+pub struct CTTableBuilder<'a, LexemeT, StorageT>
+where
+    StorageT: Eq + Hash,
+{
+    fmeta: FileMeta,
+    grm: cfgrammar::yacc::YaccGrammar<StorageT>,
+    pb: CTParserBuilder<'a, LexemeT, StorageT>,
+}
+
+impl<'a, LexemeT, StorageT> CTTableBuilder<'a, LexemeT, StorageT>
+where
+    LexemeT: Lexeme<StorageT>,
+    StorageT: 'static + Debug + Hash + PrimInt + Serialize + Unsigned,
+    usize: AsPrimitive<StorageT>,
+{
+    pub fn build_table(self) -> Result<CTTableAnalyzer<'a, LexemeT, StorageT>, Box<dyn Error>> {
+        let (sgraph, stable) = from_yacc(&self.grm, Minimiser::Pager)?;
+        Ok(CTTableAnalyzer {
+            fmeta: self.fmeta,
+            pb: self.pb,
+            tdata: (self.grm, sgraph, stable),
+        })
+    }
+}
+
+type TableData<StorageT> = (
+    cfgrammar::yacc::YaccGrammar<StorageT>,
+    StateGraph<StorageT>,
+    StateTable<StorageT>,
+);
+
+pub struct CTTableAnalyzer<'a, LexemeT, StorageT>
+where
+    StorageT: Eq + Hash,
+{
+    pb: CTParserBuilder<'a, LexemeT, StorageT>,
+    fmeta: FileMeta,
+    tdata: TableData<StorageT>,
+}
+
+impl<'a, LexemeT, StorageT> CTTableAnalyzer<'a, LexemeT, StorageT>
+where
+    LexemeT: Lexeme<StorageT>,
+    StorageT: 'static + Debug + Hash + PrimInt + Serialize + Unsigned,
+    usize: AsPrimitive<StorageT>,
+{
+    pub fn analyze_table<'b: 'a, A: Analysis<TableData<StorageT>>>(
+        self,
+        analysis: &mut A,
+    ) -> CTParserSourceGenerator<'a, LexemeT, StorageT> {
+        analysis.analyze(&self.tdata);
+        CTParserSourceGenerator {
+            pb: self.pb,
+            fmeta: self.fmeta,
+            tdata: self.tdata,
+        }
+    }
+}
+
+pub struct CTParserSourceGenerator<'a, LexemeT, StorageT>
+where
+    StorageT: Eq + Hash,
+{
+    fmeta: FileMeta,
+    tdata: TableData<StorageT>,
+    pb: CTParserBuilder<'a, LexemeT, StorageT>,
+}
+
+impl<'a, LexemeT, StorageT> CTGrammarAnalyzer<'a, LexemeT, StorageT>
+where
+    LexemeT: Lexeme<StorageT>,
+    StorageT: 'static + Debug + Hash + PrimInt + Serialize + Unsigned,
+    usize: AsPrimitive<StorageT>,
+{
+    pub fn analyze_grammar<A: Analysis<cfgrammar::yacc::ast::GrammarAST>>(
+        self,
+        analysis: &mut A,
+        inc: &str,
+    ) -> Result<CTTableBuilder<'a, LexemeT, StorageT>, Vec<cfgrammar::yacc::parser::YaccGrammarError>>
+    {
+        let yk = self.fmeta.yk;
+        Ok(CTTableBuilder {
+            fmeta: self.fmeta,
+            grm: YaccGrammar::<StorageT>::new_analysis_with_storaget(yk, inc, analysis)?,
+            pb: self.pb,
+        })
+    }
+}
+
+pub struct CTConflictAnalysis {
+    num_sr_rr: Option<(usize, usize)>,
+}
+
+impl CTConflictAnalysis {
+    pub fn new() -> Self {
+        Self { num_sr_rr: None }
+    }
+
+    pub fn sr_len(&self) -> Option<usize> {
+        self.num_sr_rr.map(|x| x.0)
+    }
+
+    pub fn rr_len(&self) -> Option<usize> {
+        self.num_sr_rr.map(|x| x.1)
+    }
+
+    // Returns true if this analysis has not run or unexpected conflicts occurred.
+    pub fn unexpected_conflicts(&self) -> bool {
+        if let Some((sr, rr)) = self.num_sr_rr {
+            sr > 0 || rr > 0
+        } else {
+            false
+        }
+    }
+}
+
+impl<StorageT> Analysis<TableData<StorageT>> for CTConflictAnalysis
+where
+    StorageT: 'static + Debug + Hash + PrimInt + Serialize + Unsigned,
+    usize: AsPrimitive<StorageT>,
+{
+    fn analyze(&mut self, (grm, _sgraph, stable): &TableData<StorageT>) {
+        if let Some(c) = stable.conflicts() {
+            match (grm.expect(), grm.expectrr()) {
+                (Some(i), Some(j)) if i == c.sr_len() && j == c.rr_len() => (),
+                (Some(i), None) if i == c.sr_len() && 0 == c.rr_len() => (),
+                (None, Some(j)) if 0 == c.sr_len() && j == c.rr_len() => (),
+                (None, None) if 0 == c.rr_len() && 0 == c.sr_len() => (),
+                _ => self.num_sr_rr = Some((c.sr_len(), c.rr_len())),
+            }
+        }
+    }
+}
+
+impl<'a, LexemeT, StorageT> CTParserSourceGenerator<'a, LexemeT, StorageT>
+where
+    LexemeT: Lexeme<StorageT>,
+    StorageT: 'static + Debug + Hash + PrimInt + Serialize + Unsigned,
+    usize: AsPrimitive<StorageT>,
+{
+    pub fn write_parser(self) -> Result<CTParser<StorageT>, Box<dyn Error>> {
+        let grmp = &self.fmeta.grmp;
+        let rule_ids = self
+            .tdata
+            .0
+            .tokens_map()
+            .iter()
+            .map(|(&n, &i)| (n.to_owned(), i.as_storaget()))
+            .collect::<HashMap<_, _>>();
+        let cache = self.pb.rebuild_cache(&self.tdata.0);
+
+        // We don't need to go through the full rigmarole of generating an output file if all of
+        // the following are true: the output file exists; it is newer than the input file; and the
+        // cache hasn't changed. The last of these might be surprising, but it's vital: we don't
+        // know, for example, what the IDs map might be from one run to the next, and it might
+        // change for reasons beyond lrpar's control. If it does change, that means that the lexer
+        // and lrpar would get out of sync, so we have to play it safe and regenerate in such
+        // cases.
+        if let Ok(ref inmd) = fs::metadata(grmp) {
+            if let Ok(ref out_rs_md) = fs::metadata(&self.fmeta.outp) {
+                if FileTime::from_last_modification_time(out_rs_md)
+                    > FileTime::from_last_modification_time(inmd)
+                {
+                    if let Ok(outc) = read_to_string(grmp) {
+                        if outc.contains(&cache) {
+                            return Ok(CTParser {
+                                regenerated: false,
+                                rule_ids,
+                                conflicts: None,
+                            });
+                        }
+                    }
+                }
+            }
+        }
+
+        // At this point, we know we're going to generate fresh output; however, if something goes
+        // wrong in the process between now and us writing /out/blah.rs, rustc thinks that
+        // everything's gone swimmingly (even if build.rs errored!), and tries to carry on
+        // compilation, leading to weird errors. We therefore delete /out/blah.rs at this point,
+        // which means, at worse, the user gets a "file not found" error from rustc (which is less
+        // confusing than the alternatives).
+        //
+        // A note about the above comment:
+        //     I believe the situation that the above comment describes may have been fixed with
+        //     https://github.com/rust-lang/cargo/issues/6770
+        //
+        // The movement to analysis has removed errors below this point to above it, however
+        // there already were errors above this point which could occur before the `remove_file()`
+        fs::remove_file(&self.fmeta.outp).ok();
+        let mod_name = match self.pb.mod_name {
+            Some(s) => s.to_owned(),
+            None => {
+                // The user hasn't specified a module name, so we create one automatically: what we
+                // do is strip off all the filename extensions (note that it's likely that inp ends
+                // with `y.rs`, so we potentially have to strip off more than one extension) and
+                // then add `_y` to the end.
+
+                let mut stem = grmp.to_str().unwrap();
+                loop {
+                    let new_stem = Path::new(stem).file_stem().unwrap().to_str().unwrap();
+                    if stem == new_stem {
+                        break;
+                    }
+                    stem = new_stem;
+                }
+                format!("{}_y", stem)
+            }
+        };
+
+        self.pb.output_file(
+            &self.tdata.0,
+            &self.tdata.2,
+            &mod_name,
+            &self.fmeta.outp,
+            &cache,
+        )?;
+
+        let conflicts = if self.tdata.2.conflicts().is_some() {
+            let tdata = (self.tdata.0, self.tdata.1, self.tdata.2);
+            Some(tdata)
+        } else {
+            None
+        };
+        Ok(CTParser {
+            regenerated: true,
+            rule_ids,
+            conflicts,
+        })
+    }
+}
+
 /// Return a version of the string `s` which is safe to embed in source code as a string.
 fn str_escape(s: &str) -> String {
     s.replace('\\', "\\\\").replace('"', "\\\"")
@@ -1266,6 +1492,7 @@ where
 mod test {
     use std::{fs::File, io::Write, path::PathBuf};
 
+    use super::CTConflictAnalysis;
     use super::{CTConflictsError, CTParserBuilder};
     use crate::test_utils::TestLexeme;
     use cfgrammar::yacc::{YaccKind, YaccOriginalActionKind};
@@ -1327,8 +1554,8 @@ C : 'a';"
             Ok(_) => panic!("Expected error"),
             Err(e) => {
                 let cs = e.downcast_ref::<CTConflictsError<u16>>();
-                assert_eq!(cs.unwrap().stable.conflicts().unwrap().rr_len(), 1);
-                assert_eq!(cs.unwrap().stable.conflicts().unwrap().sr_len(), 1);
+                assert_eq!(cs.unwrap().analysis.rr_len(), Some(1));
+                assert_eq!(cs.unwrap().analysis.sr_len(), Some(1));
             }
         }
     }
@@ -1357,8 +1584,8 @@ B: 'a';"
             Ok(_) => panic!("Expected error"),
             Err(e) => {
                 let cs = e.downcast_ref::<CTConflictsError<u16>>();
-                assert_eq!(cs.unwrap().stable.conflicts().unwrap().rr_len(), 0);
-                assert_eq!(cs.unwrap().stable.conflicts().unwrap().sr_len(), 1);
+                assert_eq!(cs.unwrap().analysis.rr_len(), Some(0));
+                assert_eq!(cs.unwrap().analysis.sr_len(), Some(1));
             }
         }
     }
@@ -1389,9 +1616,44 @@ C : 'a';"
             Ok(_) => panic!("Expected error"),
             Err(e) => {
                 let cs = e.downcast_ref::<CTConflictsError<u16>>();
-                assert_eq!(cs.unwrap().stable.conflicts().unwrap().rr_len(), 1);
-                assert_eq!(cs.unwrap().stable.conflicts().unwrap().sr_len(), 1);
+                assert_eq!(cs.unwrap().analysis.rr_len(), Some(1));
+                assert_eq!(cs.unwrap().analysis.sr_len(), Some(1));
             }
         }
+    }
+
+    #[test]
+    fn test_expectrr_analysis() -> Result<(), Box<dyn std::error::Error>> {
+        let temp = TempDir::new().unwrap();
+        let mut file_path = PathBuf::from(temp.as_ref());
+        file_path.push("grm.y");
+        let mut f = File::create(&file_path).unwrap();
+        let _ = f.write_all(
+            "%start A
+%expect 1
+%expect-rr 2
+%%
+A : 'a' 'b' | B 'b';
+B : 'a' | C;
+C : 'a';"
+                .as_bytes(),
+        );
+        let mut ga = cfgrammar::analysis::YaccGrammarWarningAnalysis::new(&file_path);
+        let mut ca = CTConflictAnalysis::new();
+        let mut src_buf = String::new();
+        CTParserBuilder::<TestLexeme, _>::new()
+            .yacckind(YaccKind::Original(YaccOriginalActionKind::GenericParseTree))
+            .grammar_path(file_path.to_str().unwrap())
+            .output_path(file_path.with_extension("ignored"))
+            .build_for_analysis()
+            .read_grammar(&mut src_buf)?
+            .analyze_grammar(&mut ga, &src_buf)
+            .unwrap()
+            .build_table()?
+            .analyze_table(&mut ca)
+            .write_parser()?;
+        assert_eq!(ca.rr_len(), Some(1));
+        assert_eq!(ca.sr_len(), Some(1));
+        Ok(())
     }
 }
