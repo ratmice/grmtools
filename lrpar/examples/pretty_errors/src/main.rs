@@ -22,19 +22,34 @@ fn spanned_report<'a, T: Spanned>(
     w: &T,
     kind: ReportKind,
     file_name: &'a str,
+    src: &str,
 ) -> Report<(&'a str, Range<usize>)> {
     let spans = w.spans();
     let span = spans.first().unwrap();
-    // FIXME convert these spans from byte-offsets to a character index which ariadne expects.
-    let mut rb = Report::build(kind, file_name, span.start()).with_label(
-        Label::new((YACC_FILENAME, span.start()..span.end())).with_message(format!("{}", w)),
+    // Character index seems to be relative to 0 rather than the
+    // offset parameter of Report::build, or beginning of line?
+    let span_prefix = &src[..span.start()];
+    let span_prefix_len = span_prefix.chars().count();
+    let span_substr_len = src[span.start()..span.end()].chars().count();
+    let mut rb = Report::build(kind, file_name, span_prefix_len).with_label(
+        Label::new((
+            YACC_FILENAME,
+            span_prefix_len..span_prefix_len + span_substr_len,
+        ))
+        .with_message(format!("{}", w)),
     );
     for span in spans.iter().skip(1) {
         let msg = match w.spanskind() {
             SpansKind::DuplicationError => Some("Duplicate"),
             SpansKind::Error => None,
         };
-        let label = Label::new((YACC_FILENAME, span.start()..span.end()));
+        let span_prefix = &src[..span.start()];
+        let span_prefix_len = span_prefix.chars().count();
+        let span_substr_len = src[span.start()..span.end()].chars().count();
+        let label = Label::new((
+            YACC_FILENAME,
+            span_prefix_len..span_prefix_len + span_substr_len,
+        ));
         let label = if let Some(msg) = msg {
             label.with_message(msg)
         } else {
@@ -63,7 +78,7 @@ impl AriadneYaccWarningAnalysis<String> {
     }
 
     #[allow(clippy::type_complexity)]
-    pub fn reports(&self) -> Option<Vec<Report<(&str, Range<usize>)>>> {
+    pub fn reports(&self, src: &str) -> Option<Vec<Report<(&str, Range<usize>)>>> {
         let warnings = &self.warning_analysis;
         let mut reports = Vec::new();
         if !warnings.is_empty() {
@@ -72,6 +87,7 @@ impl AriadneYaccWarningAnalysis<String> {
                     warning,
                     ReportKind::Warning,
                     self.source_id(),
+                    src,
                 ))
             }
             Some(reports)
@@ -123,7 +139,7 @@ fn main() -> ExitCode {
                     .unwrap();
             } else {
                 let _ = analysis
-                    .reports()
+                    .reports(&yacc_src_buf)
                     .unwrap()
                     .iter()
                     .map(|r| {
@@ -136,12 +152,12 @@ fn main() -> ExitCode {
         }
         Err(es) => {
             for e in es {
-                spanned_report(&e, ReportKind::Error, analysis.source_id())
+                spanned_report(&e, ReportKind::Error, analysis.source_id(), &yacc_src_buf)
                     .eprint((analysis.source_id(), Source::from(&yacc_src_buf)))
                     .unwrap();
             }
             let _ = analysis
-                .reports()
+                .reports(&yacc_src_buf)
                 .unwrap()
                 .iter()
                 .map(|r| {
