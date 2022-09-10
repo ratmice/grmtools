@@ -6,10 +6,8 @@ use std::ops::Deref;
 /// Performs an analysis on a given `Subject`, the given
 /// subject may be known to have pre-existing errors.
 pub trait Analysis<Subject> {
-    /// Perform an analysis on a given subject
-    /// The mechanisms by which you retrieve the
-    /// results of an analysis are not specified
-    /// by the trait, and particular to the types
+    /// Perform an analysis on a given subject The mechanisms by which you retrieve the
+    /// results of an analysis are not specified by the trait, and particular to the types
     /// that implement the trait.
     fn analyze(&mut self, subject: &Subject);
 }
