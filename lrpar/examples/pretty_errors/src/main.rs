@@ -125,7 +125,7 @@ fn main() -> ExitCode {
         .build_for_analysis()
         .read_grammar(&mut yacc_src_buf)
         .unwrap()
-        .analyze_grammar(&mut analysis, &yacc_src_buf);
+        .analyze_ast(&mut analysis, &yacc_src_buf);
 
     match result {
         Ok(analyzer) => {
