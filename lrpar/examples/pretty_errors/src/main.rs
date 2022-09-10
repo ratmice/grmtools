@@ -162,15 +162,14 @@ fn main() -> ExitCode {
                     .eprint((analysis.source_id(), Source::from(&yacc_src_buf)))
                     .unwrap();
             }
-            let _ = analysis
+            analysis
                 .reports(&yacc_src_buf)
                 .unwrap()
                 .iter()
-                .map(|r| {
+                .for_each(|r| {
                     r.eprint((analysis.source_id(), Source::from(&yacc_src_buf)))
                         .unwrap()
-                })
-                .collect::<()>();
+                });
             ExitCode::FAILURE
         }
     }
