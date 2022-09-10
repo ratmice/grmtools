@@ -414,7 +414,7 @@ where
                         phantom_storage: PhantomData,
                     })?
                 }
-                conflict_analyzed.write_parser()
+                conflict_analyzed.source_generator().write_parser()
             }
         }
     }
@@ -1214,11 +1214,11 @@ where
     StorageT: 'static + Debug + Hash + PrimInt + Serialize + Unsigned,
     usize: AsPrimitive<StorageT>,
 {
-    pub fn analyze_table<'b: 'a, A: Analysis<TableData<StorageT>>>(
-        self,
-        analysis: &mut A,
-    ) -> CTParserSourceGenerator<'a, LexemeT, StorageT> {
+    pub fn analyze_table<A: Analysis<TableData<StorageT>>>(self, analysis: &mut A) -> Self {
         analysis.analyze(&self.tdata);
+        self
+    }
+    pub fn source_generator(self) -> CTParserSourceGenerator<'a, LexemeT, StorageT> {
         CTParserSourceGenerator {
             pb: self.pb,
             fmeta: self.fmeta,
@@ -1656,6 +1656,7 @@ C : 'a';"
             .unwrap()
             .build_table()?
             .analyze_table(&mut ca)
+            .source_generator()
             .write_parser()?;
         assert_eq!(ca.rr_len(), Some(1));
         assert_eq!(ca.sr_len(), Some(1));
