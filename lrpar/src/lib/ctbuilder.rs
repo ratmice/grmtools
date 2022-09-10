@@ -1178,6 +1178,11 @@ where
     StorageT: 'static + Debug + Hash + PrimInt + Serialize + Unsigned,
     usize: AsPrimitive<StorageT>,
 {
+    pub fn analyze_grammar<A: Analysis<YaccGrammar<StorageT>>>(self, analysis: &mut A) -> Self {
+        analysis.analyze(&self.grm);
+        self
+    }
+
     pub fn build_table(self) -> Result<CTTableAnalyzer<'a, LexemeT, StorageT>, Box<dyn Error>> {
         let (sgraph, stable) = from_yacc(&self.grm, Minimiser::Pager)?;
         Ok(CTTableAnalyzer {

@@ -131,6 +131,7 @@ fn main() -> ExitCode {
         Ok(analyzer) => {
             if analysis.warning_analysis.is_empty() {
                 analyzer
+                    .analyze_grammar(&mut EmptyAnalysis)
                     .build_table()
                     .unwrap()
                     // FIXME use something besides EmptyAnalysis.
