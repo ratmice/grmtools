@@ -9,10 +9,10 @@ use super::{
     ast,
     firsts::YaccFirsts,
     follows::YaccFollows,
-    parser::{YaccGrammarResult, YaccParser},
+    parser::{YaccGrammarError, YaccGrammarResult, YaccParser},
     YaccKind,
 };
-use crate::{analysis::Analysis, PIdx, RIdx, SIdx, Span, Symbol, TIdx};
+use crate::{PIdx, RIdx, SIdx, Span, Symbol, TIdx};
 
 const START_RULE: &str = "^";
 const IMPLICIT_RULE: &str = "~";
@@ -111,39 +111,41 @@ where
     /// though the actual name is a fresh name that is guaranteed to be unique) that references the
     /// user defined start rule.
     pub fn new_with_storaget(yacc_kind: YaccKind, s: &str) -> YaccGrammarResult<Self> {
-        Self::_new_analysis_with_storaget(yacc_kind, s, None)
+        let (ast, errs) = Self::ast_validity(yacc_kind, s);
+        Self::new_with_validity(yacc_kind, ast, errs)
     }
 
-    /// Equivalent to [YaccGrammar::new_with_storaget] while performing a given [analysis::Analysis].
-    pub fn new_analysis_with_storaget(
-        yacc_kind: YaccKind,
-        s: &str,
-        analysis: &mut dyn Analysis<ast::GrammarAST>,
-    ) -> YaccGrammarResult<Self> {
-        Self::_new_analysis_with_storaget(yacc_kind, s, Some(analysis))
-    }
-
-    fn _new_analysis_with_storaget(
-        yacc_kind: YaccKind,
-        s: &str,
-        a: Option<&mut dyn Analysis<ast::GrammarAST>>,
-    ) -> YaccGrammarResult<Self> {
+    pub fn ast_validity(yacc_kind: YaccKind, s: &str) -> (ast::ASTValidity, Vec<YaccGrammarError>) {
+        let mut errs = Vec::new();
         let ast = match yacc_kind {
             YaccKind::Original(_) | YaccKind::Grmtools | YaccKind::Eco => {
                 let mut yp = YaccParser::new(yacc_kind, s.to_string());
-                let mut errs = Vec::new();
                 let _ = yp.parse().map_err(|e| errs.extend(e));
                 let mut ast = yp.ast();
                 let _ = ast.complete_and_validate().map_err(|e| errs.push(e));
-                if let Some(a) = a {
-                    a.analyze(&ast)
-                }
-                if !errs.is_empty() {
-                    return Err(errs);
-                }
-
                 ast
             }
+        };
+        (
+            ast::ASTValidity {
+                validity: if errs.is_empty() {
+                    ast::ValidityKind::Wellformed(ast)
+                } else {
+                    ast::ValidityKind::Malformed(ast)
+                },
+            },
+            errs,
+        )
+    }
+
+    pub fn new_with_validity(
+        yacc_kind: YaccKind,
+        ast: ast::ASTValidity,
+        errs: Vec<YaccGrammarError>,
+    ) -> YaccGrammarResult<Self> {
+        let (ast_valid, ast) = match ast.validity() {
+            ast::ValidityKind::Wellformed(ast) => (true, ast),
+            ast::ValidityKind::Malformed(ast) => (false, ast),
         };
 
         // Check that StorageT is big enough to hold RIdx/PIdx/SIdx/TIdx values; after these
@@ -340,7 +342,7 @@ where
             }
         }
 
-        let avoid_insert = if let Some(ai) = ast.avoid_insert {
+        let avoid_insert = if let Some(ai) = &ast.avoid_insert {
             let mut aiv = Vob::from_elem(false, token_names.len());
             for n in ai.keys() {
                 aiv.set(usize::from(token_map[n]), true);
@@ -352,29 +354,34 @@ where
 
         assert!(!token_names.is_empty());
         assert!(!rule_names.is_empty());
-        Ok(YaccGrammar {
-            rules_len: RIdx(rule_names.len().as_()),
-            rule_names,
-            tokens_len: TIdx(token_names.len().as_()),
-            eof_token_idx,
-            token_names,
-            token_precs,
-            token_epp,
-            prods_len: PIdx(prods.len().as_()),
-            start_prod: rules_prods[usize::from(rule_map[&start_rule])][0],
-            rules_prods,
-            prods_rules: prods_rules.into_iter().map(Option::unwrap).collect(),
-            prods: prods.into_iter().map(Option::unwrap).collect(),
-            prod_precs: prod_precs.into_iter().map(Option::unwrap).collect(),
-            implicit_rule: implicit_rule.map(|x| rule_map[&x]),
-            actions,
-            parse_param: ast.parse_param,
-            programs: ast.programs,
-            avoid_insert,
-            actiontypes,
-            expect: ast.expect.map(|(n, _)| n),
-            expectrr: ast.expectrr.map(|(n, _)| n),
-        })
+
+        if ast_valid {
+            Ok(YaccGrammar {
+                rules_len: RIdx(rule_names.len().as_()),
+                rule_names,
+                tokens_len: TIdx(token_names.len().as_()),
+                eof_token_idx,
+                token_names,
+                token_precs,
+                token_epp,
+                prods_len: PIdx(prods.len().as_()),
+                start_prod: rules_prods[usize::from(rule_map[&start_rule])][0],
+                rules_prods,
+                prods_rules: prods_rules.into_iter().map(Option::unwrap).collect(),
+                prods: prods.into_iter().map(Option::unwrap).collect(),
+                prod_precs: prod_precs.into_iter().map(Option::unwrap).collect(),
+                implicit_rule: implicit_rule.map(|x| rule_map[&x]),
+                actions,
+                parse_param: ast.parse_param.clone(),
+                programs: ast.programs.clone(),
+                avoid_insert,
+                actiontypes,
+                expect: ast.expect.map(|(n, _)| n),
+                expectrr: ast.expectrr.map(|(n, _)| n),
+            })
+        } else {
+            Err(errs)
+        }
     }
 
     /// How many productions does this grammar have?

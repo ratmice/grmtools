@@ -9,6 +9,21 @@ use super::{Precedence, YaccGrammarError, YaccGrammarErrorKind};
 
 use crate::Span;
 
+pub struct ASTValidity {
+    pub(crate) validity: ValidityKind<GrammarAST>,
+}
+
+impl ASTValidity {
+    pub fn validity(&self) -> &ValidityKind<GrammarAST> {
+        &self.validity
+    }
+}
+
+pub enum ValidityKind<T> {
+    Wellformed(T),
+    Malformed(T),
+}
+
 /// An AST representing a grammar. This is built up gradually: when it is finished, the
 /// `complete_and_validate` must be called exactly once in order to finish the set-up. At that
 /// point, any further mutations made to the struct lead to undefined behaviour.
