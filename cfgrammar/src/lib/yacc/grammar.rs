@@ -9,7 +9,7 @@ use super::{
     ast,
     firsts::YaccFirsts,
     follows::YaccFollows,
-    parser::{YaccGrammarError, YaccGrammarResult, YaccParser},
+    parser::{YaccGrammarResult, YaccParser},
     YaccKind,
 };
 use crate::{PIdx, RIdx, SIdx, Span, Symbol, TIdx};
@@ -111,11 +111,15 @@ where
     /// though the actual name is a fresh name that is guaranteed to be unique) that references the
     /// user defined start rule.
     pub fn new_with_storaget(yacc_kind: YaccKind, s: &str) -> YaccGrammarResult<Self> {
-        let (ast, errs) = Self::ast_validity(yacc_kind, s);
-        Self::new_with_validity(yacc_kind, ast, errs)
+        let validity = Self::ast_validity(yacc_kind, s);
+        if validity.is_valid() {
+            Self::new_with_validity(yacc_kind, validity)
+        } else {
+            Err(validity.errs)
+        }
     }
 
-    pub fn ast_validity(yacc_kind: YaccKind, s: &str) -> (ast::ASTValidity, Vec<YaccGrammarError>) {
+    pub fn ast_validity(yacc_kind: YaccKind, s: &str) -> ast::ASTValidity {
         let mut errs = Vec::new();
         let ast = match yacc_kind {
             YaccKind::Original(_) | YaccKind::Grmtools | YaccKind::Eco => {
@@ -126,28 +130,16 @@ where
                 ast
             }
         };
-        (
-            ast::ASTValidity {
-                validity: if errs.is_empty() {
-                    ast::ValidityKind::Wellformed(ast)
-                } else {
-                    ast::ValidityKind::Malformed(ast)
-                },
-            },
-            errs,
-        )
+        ast::ASTValidity { ast, errs }
     }
 
     pub fn new_with_validity(
         yacc_kind: YaccKind,
-        ast: ast::ASTValidity,
-        errs: Vec<YaccGrammarError>,
+        ast_validity: ast::ASTValidity,
     ) -> YaccGrammarResult<Self> {
-        let (ast_valid, ast) = match ast.validity() {
-            ast::ValidityKind::Wellformed(ast) => (true, ast),
-            ast::ValidityKind::Malformed(ast) => (false, ast),
-        };
-
+        let ast_valid = ast_validity.is_valid();
+        let ast = ast_validity.ast;
+        let errs = ast_validity.errs;
         // Check that StorageT is big enough to hold RIdx/PIdx/SIdx/TIdx values; after these
         // checks we can guarantee that things like RIdx(ast.rules.len().as_()) are safe.
         if ast.rules.len() > num_traits::cast(StorageT::max_value()).unwrap() {
@@ -372,8 +364,8 @@ where
                 prod_precs: prod_precs.into_iter().map(Option::unwrap).collect(),
                 implicit_rule: implicit_rule.map(|x| rule_map[&x]),
                 actions,
-                parse_param: ast.parse_param.clone(),
-                programs: ast.programs.clone(),
+                parse_param: ast.parse_param,
+                programs: ast.programs,
                 avoid_insert,
                 actiontypes,
                 expect: ast.expect.map(|(n, _)| n),

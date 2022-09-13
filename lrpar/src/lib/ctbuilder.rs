@@ -23,7 +23,6 @@ use cfgrammar::{
     analysis::Analysis,
     analysis::YaccGrammarWarningAnalysis,
     newlinecache::NewlineCache,
-    yacc::ast::ValidityKind,
     yacc::{YaccGrammar, YaccKind, YaccOriginalActionKind},
     RIdx, Spanned, Symbol,
 };
@@ -1150,13 +1149,11 @@ where
     ) -> Result<CTTableBuilder<'a, LexemeT, StorageT>, Vec<cfgrammar::yacc::parser::YaccGrammarError>>
     {
         let yk = self.fmeta.yk;
-        let (ast, errs) = YaccGrammar::<StorageT>::ast_validity(yk, inc);
-        match &ast.validity() {
-            ValidityKind::Wellformed(ast) | ValidityKind::Malformed(ast) => analysis.analyze(ast),
-        }
+        let validity = YaccGrammar::<StorageT>::ast_validity(yk, inc);
+        analysis.analyze(validity.ast());
         Ok(CTTableBuilder {
             fmeta: self.fmeta,
-            grm: YaccGrammar::<StorageT>::new_with_validity(yk, ast, errs)?,
+            grm: YaccGrammar::<StorageT>::new_with_validity(yk, validity)?,
             pb: self.pb,
         })
     }

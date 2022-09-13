@@ -10,18 +10,18 @@ use super::{Precedence, YaccGrammarError, YaccGrammarErrorKind};
 use crate::Span;
 
 pub struct ASTValidity {
-    pub(crate) validity: ValidityKind<GrammarAST>,
+    pub ast: GrammarAST,
+    pub errs: Vec<YaccGrammarError>,
 }
 
 impl ASTValidity {
-    pub fn validity(&self) -> &ValidityKind<GrammarAST> {
-        &self.validity
+    pub fn ast(&self) -> &GrammarAST {
+        &self.ast
     }
-}
 
-pub enum ValidityKind<T> {
-    Wellformed(T),
-    Malformed(T),
+    pub fn is_valid(&self) -> bool {
+        self.errs.is_empty()
+    }
 }
 
 /// An AST representing a grammar. This is built up gradually: when it is finished, the
