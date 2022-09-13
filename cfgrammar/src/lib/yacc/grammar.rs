@@ -5,13 +5,7 @@ use num_traits::{self, AsPrimitive, PrimInt, Unsigned};
 use serde::{Deserialize, Serialize};
 use vob::Vob;
 
-use super::{
-    ast,
-    firsts::YaccFirsts,
-    follows::YaccFollows,
-    parser::{YaccGrammarResult, YaccParser},
-    YaccKind,
-};
+use super::{ast, firsts::YaccFirsts, follows::YaccFollows, parser::YaccGrammarResult, YaccKind};
 use crate::{PIdx, RIdx, SIdx, Span, Symbol, TIdx};
 
 const START_RULE: &str = "^";
@@ -111,26 +105,12 @@ where
     /// though the actual name is a fresh name that is guaranteed to be unique) that references the
     /// user defined start rule.
     pub fn new_with_storaget(yacc_kind: YaccKind, s: &str) -> YaccGrammarResult<Self> {
-        let validity = Self::ast_validity(yacc_kind, s);
+        let validity = ast::ASTValidity::new(yacc_kind, s);
         if validity.is_valid() {
             Self::new_with_validity(yacc_kind, validity)
         } else {
             Err(validity.errs)
         }
-    }
-
-    pub fn ast_validity(yacc_kind: YaccKind, s: &str) -> ast::ASTValidity {
-        let mut errs = Vec::new();
-        let ast = match yacc_kind {
-            YaccKind::Original(_) | YaccKind::Grmtools | YaccKind::Eco => {
-                let mut yp = YaccParser::new(yacc_kind, s.to_string());
-                let _ = yp.parse().map_err(|e| errs.extend(e));
-                let mut ast = yp.ast();
-                let _ = ast.complete_and_validate().map_err(|e| errs.push(e));
-                ast
-            }
-        };
-        ast::ASTValidity { ast, errs }
     }
 
     pub fn new_with_validity(

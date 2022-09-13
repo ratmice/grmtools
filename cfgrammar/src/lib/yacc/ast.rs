@@ -5,7 +5,7 @@ use std::{
 
 use indexmap::{IndexMap, IndexSet};
 
-use super::{Precedence, YaccGrammarError, YaccGrammarErrorKind};
+use super::{parser::YaccParser, Precedence, YaccGrammarError, YaccGrammarErrorKind, YaccKind};
 
 use crate::Span;
 
@@ -15,6 +15,20 @@ pub struct ASTValidity {
 }
 
 impl ASTValidity {
+    pub fn new(yacc_kind: YaccKind, s: &str) -> Self {
+        let mut errs = Vec::new();
+        let ast = match yacc_kind {
+            YaccKind::Original(_) | YaccKind::Grmtools | YaccKind::Eco => {
+                let mut yp = YaccParser::new(yacc_kind, s.to_string());
+                let _ = yp.parse().map_err(|e| errs.extend(e));
+                let mut ast = yp.ast();
+                let _ = ast.complete_and_validate().map_err(|e| errs.push(e));
+                ast
+            }
+        };
+        ASTValidity { ast, errs }
+    }
+
     pub fn ast(&self) -> &GrammarAST {
         &self.ast
     }

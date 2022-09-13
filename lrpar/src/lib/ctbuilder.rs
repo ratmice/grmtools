@@ -23,7 +23,7 @@ use cfgrammar::{
     analysis::Analysis,
     analysis::YaccGrammarWarningAnalysis,
     newlinecache::NewlineCache,
-    yacc::{YaccGrammar, YaccKind, YaccOriginalActionKind},
+    yacc::{ast::ASTValidity, YaccGrammar, YaccKind, YaccOriginalActionKind},
     RIdx, Spanned, Symbol,
 };
 use filetime::FileTime;
@@ -1149,7 +1149,7 @@ where
     ) -> Result<CTTableBuilder<'a, LexemeT, StorageT>, Vec<cfgrammar::yacc::parser::YaccGrammarError>>
     {
         let yk = self.fmeta.yk;
-        let validity = YaccGrammar::<StorageT>::ast_validity(yk, inc);
+        let validity = ASTValidity::new(yk, inc);
         analysis.analyze(validity.ast());
         Ok(CTTableBuilder {
             fmeta: self.fmeta,
