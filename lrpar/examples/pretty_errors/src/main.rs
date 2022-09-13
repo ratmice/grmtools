@@ -125,19 +125,19 @@ fn main() -> ExitCode {
         .build_for_analysis()
         .read_grammar(&mut yacc_src_buf)
         .unwrap()
-        // analyze_ast() can only be run once
-        .analyze_ast(&mut analysis, &yacc_src_buf);
+        .build_ast(&yacc_src_buf)
+        .analyze_ast(&mut analysis)
+        .analyze_ast(&mut EmptyAnalysis)
+        .build_grammar();
 
     match result {
         Ok(analyzer) => {
             if analysis.warning_analysis.is_empty() {
                 analyzer
-                    // can be run 0 or multiple times.
                     .analyze_grammar(&mut EmptyAnalysis)
                     .analyze_grammar(&mut EmptyAnalysis)
                     .build_table()
                     .unwrap()
-                    // FIXME use something besides EmptyAnalysis.
                     .analyze_table(&mut EmptyAnalysis)
                     .analyze_table(&mut EmptyAnalysis)
                     .source_generator()

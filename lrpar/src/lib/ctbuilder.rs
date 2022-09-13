@@ -23,7 +23,7 @@ use cfgrammar::{
     analysis::Analysis,
     analysis::YaccGrammarWarningAnalysis,
     newlinecache::NewlineCache,
-    yacc::{ast::ASTValidity, YaccGrammar, YaccKind, YaccOriginalActionKind},
+    yacc::{ast::ASTValidity, YaccGrammar, YaccGrammarError, YaccKind, YaccOriginalActionKind},
     RIdx, Spanned, Symbol,
 };
 use filetime::FileTime;
@@ -380,7 +380,10 @@ where
         }
 
         // `read` has moved into analyzed.
-        let analyzed = read.analyze_ast(&mut analysis, &inc);
+        let analyzed = read
+            .build_ast(&inc)
+            .analyze_ast(&mut analysis)
+            .build_grammar();
         match analyzed {
             Err(errs) => {
                 let mut line_cache = NewlineCache::new();
@@ -428,7 +431,7 @@ where
     pub(crate) fn read_grammar_for_analysis(
         self,
         inc: &mut String,
-    ) -> Result<CTGrammarASTAnalyzer<'a, LexemeT, StorageT>, Box<dyn Error>> {
+    ) -> Result<CTGrammarASTAnalyzerBuilder<'a, LexemeT, StorageT>, Box<dyn Error>> {
         inc.clear();
         let grmp = self
             .grammar_path
@@ -455,7 +458,7 @@ where
 
         let mut file = File::open(&grmp)?;
         file.read_to_string(inc)?;
-        Ok(CTGrammarASTAnalyzer {
+        Ok(CTGrammarASTAnalyzerBuilder {
             fmeta: FileMeta {
                 grmp: grmp.to_owned(),
                 outp: outp.to_owned(),
@@ -1123,8 +1126,32 @@ where
     pub fn read_grammar(
         self,
         inc: &mut String,
-    ) -> Result<CTGrammarASTAnalyzer<'a, LexemeT, StorageT>, Box<dyn Error>> {
+    ) -> Result<CTGrammarASTAnalyzerBuilder<'a, LexemeT, StorageT>, Box<dyn Error>> {
         self.pb.read_grammar_for_analysis(inc)
+    }
+}
+
+pub struct CTGrammarASTAnalyzerBuilder<'a, LexemeT, StorageT>
+where
+    StorageT: Eq + Hash,
+{
+    fmeta: FileMeta,
+    pb: CTParserBuilder<'a, LexemeT, StorageT>,
+}
+
+impl<'a, LexemeT, StorageT> CTGrammarASTAnalyzerBuilder<'a, LexemeT, StorageT>
+where
+    LexemeT: Lexeme<StorageT>,
+    StorageT: 'static + Debug + Hash + PrimInt + Serialize + Unsigned,
+    usize: AsPrimitive<StorageT>,
+{
+    pub fn build_ast(self, inc: &str) -> CTGrammarASTAnalyzer<'a, LexemeT, StorageT> {
+        let ast_validation = ASTValidity::new(self.fmeta.yk, inc);
+        CTGrammarASTAnalyzer {
+            fmeta: self.fmeta,
+            ast_validation,
+            pb: self.pb,
+        }
     }
 }
 
@@ -1133,6 +1160,7 @@ where
     StorageT: Eq + Hash,
 {
     fmeta: FileMeta,
+    ast_validation: ASTValidity,
     pb: CTParserBuilder<'a, LexemeT, StorageT>,
 }
 
@@ -1145,15 +1173,17 @@ where
     pub fn analyze_ast<A: Analysis<cfgrammar::yacc::ast::GrammarAST>>(
         self,
         analysis: &mut A,
-        inc: &str,
-    ) -> Result<CTTableBuilder<'a, LexemeT, StorageT>, Vec<cfgrammar::yacc::parser::YaccGrammarError>>
-    {
-        let yk = self.fmeta.yk;
-        let validity = ASTValidity::new(yk, inc);
-        analysis.analyze(validity.ast());
+    ) -> Self {
+        analysis.analyze(self.ast_validation.ast());
+        self
+    }
+
+    pub fn build_grammar(
+        self,
+    ) -> Result<CTTableBuilder<'a, LexemeT, StorageT>, Vec<YaccGrammarError>> {
         Ok(CTTableBuilder {
+            grm: YaccGrammar::<StorageT>::new_with_validity(self.fmeta.yk, self.ast_validation)?,
             fmeta: self.fmeta,
-            grm: YaccGrammar::<StorageT>::new_with_validity(yk, validity)?,
             pb: self.pb,
         })
     }
@@ -1654,7 +1684,9 @@ C : 'a';"
             .output_path(file_path.with_extension("ignored"))
             .build_for_analysis()
             .read_grammar(&mut src_buf)?
-            .analyze_ast(&mut ga, &src_buf)
+            .build_ast(&src_buf)
+            .analyze_ast(&mut ga)
+            .build_grammar()
             .unwrap()
             .build_table()?
             .analyze_table(&mut ca)

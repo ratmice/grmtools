@@ -115,11 +115,12 @@ where
 
     pub fn new_with_validity(
         yacc_kind: YaccKind,
-        ast_validity: ast::ASTValidity,
+        ast_validation: ast::ASTValidity,
     ) -> YaccGrammarResult<Self> {
-        let ast_valid = ast_validity.is_valid();
-        let ast = ast_validity.ast;
-        let errs = ast_validity.errs;
+        if !ast_validation.is_valid() {
+            return Err(ast_validation.errs);
+        }
+        let ast = ast_validation.ast;
         // Check that StorageT is big enough to hold RIdx/PIdx/SIdx/TIdx values; after these
         // checks we can guarantee that things like RIdx(ast.rules.len().as_()) are safe.
         if ast.rules.len() > num_traits::cast(StorageT::max_value()).unwrap() {
@@ -327,33 +328,29 @@ where
         assert!(!token_names.is_empty());
         assert!(!rule_names.is_empty());
 
-        if ast_valid {
-            Ok(YaccGrammar {
-                rules_len: RIdx(rule_names.len().as_()),
-                rule_names,
-                tokens_len: TIdx(token_names.len().as_()),
-                eof_token_idx,
-                token_names,
-                token_precs,
-                token_epp,
-                prods_len: PIdx(prods.len().as_()),
-                start_prod: rules_prods[usize::from(rule_map[&start_rule])][0],
-                rules_prods,
-                prods_rules: prods_rules.into_iter().map(Option::unwrap).collect(),
-                prods: prods.into_iter().map(Option::unwrap).collect(),
-                prod_precs: prod_precs.into_iter().map(Option::unwrap).collect(),
-                implicit_rule: implicit_rule.map(|x| rule_map[&x]),
-                actions,
-                parse_param: ast.parse_param,
-                programs: ast.programs,
-                avoid_insert,
-                actiontypes,
-                expect: ast.expect.map(|(n, _)| n),
-                expectrr: ast.expectrr.map(|(n, _)| n),
-            })
-        } else {
-            Err(errs)
-        }
+        Ok(YaccGrammar {
+            rules_len: RIdx(rule_names.len().as_()),
+            rule_names,
+            tokens_len: TIdx(token_names.len().as_()),
+            eof_token_idx,
+            token_names,
+            token_precs,
+            token_epp,
+            prods_len: PIdx(prods.len().as_()),
+            start_prod: rules_prods[usize::from(rule_map[&start_rule])][0],
+            rules_prods,
+            prods_rules: prods_rules.into_iter().map(Option::unwrap).collect(),
+            prods: prods.into_iter().map(Option::unwrap).collect(),
+            prod_precs: prod_precs.into_iter().map(Option::unwrap).collect(),
+            implicit_rule: implicit_rule.map(|x| rule_map[&x]),
+            actions,
+            parse_param: ast.parse_param,
+            programs: ast.programs,
+            avoid_insert,
+            actiontypes,
+            expect: ast.expect.map(|(n, _)| n),
+            expectrr: ast.expectrr.map(|(n, _)| n),
+        })
     }
 
     /// How many productions does this grammar have?
