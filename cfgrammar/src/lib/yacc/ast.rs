@@ -36,6 +36,10 @@ impl ASTValidity {
     pub fn is_valid(&self) -> bool {
         self.errs.is_empty()
     }
+
+    pub fn errors(&self) -> &[YaccGrammarError] {
+        self.errs.as_slice()
+    }
 }
 
 /// An AST representing a grammar. This is built up gradually: when it is finished, the
