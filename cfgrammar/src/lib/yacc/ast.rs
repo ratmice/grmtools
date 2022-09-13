@@ -14,7 +14,11 @@ pub struct ASTValidity {
     pub errs: Vec<YaccGrammarError>,
 }
 
+/// Provides access to an ast which may or may not be valid,
+/// An AST which is invalid is provided for further analysis.
 impl ASTValidity {
+    /// The AST will be invalid if errors were encountered during
+    /// construction in which case `errors()` will be non-empty.
     pub fn new(yacc_kind: YaccKind, s: &str) -> Self {
         let mut errs = Vec::new();
         let ast = match yacc_kind {
@@ -29,14 +33,18 @@ impl ASTValidity {
         ASTValidity { ast, errs }
     }
 
+    /// Returns a `GrammarAST` which may contain errors, and should
+    /// be checked for validity.
     pub fn ast(&self) -> &GrammarAST {
         &self.ast
     }
 
+    /// Whether this `GrammarAST` is valid or not.
     pub fn is_valid(&self) -> bool {
         self.errs.is_empty()
     }
 
+    /// All errors encountered during AST construction.
     pub fn errors(&self) -> &[YaccGrammarError] {
         self.errs.as_slice()
     }
