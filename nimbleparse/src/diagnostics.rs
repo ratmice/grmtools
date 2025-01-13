@@ -25,8 +25,8 @@ where
     StorageT: 'static + num_traits::PrimInt + num_traits::Unsigned,
 {
     let pidx = usize::from(pidx);
-    assert!(pidx < ast.prods.len());
-    let prod = &ast.prods[pidx];
+    assert!(pidx < ast.prods().len());
+    let prod = &ast.prods()[pidx];
     prod.symbols
         .iter()
         .map(|sym| match sym {

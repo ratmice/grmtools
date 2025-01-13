@@ -1182,7 +1182,7 @@ mod test {
         assert_eq!(grm.get_rule("A").unwrap().pidxs, vec![0]);
         let a_span = Span::new(33, 34);
         assert_eq!(
-            grm.prods[grm.get_rule("A").unwrap().pidxs[0]],
+            grm.prods()[grm.get_rule("A").unwrap().pidxs[0]],
             Production {
                 symbols: vec![token_span("a", a_span)],
                 precedence: None,
@@ -1207,7 +1207,7 @@ mod test {
         .unwrap();
         let a_span = Span::new(33, 34);
         assert_eq!(
-            grm.prods[grm.get_rule("A").unwrap().pidxs[0]],
+            grm.prods()[grm.get_rule("A").unwrap().pidxs[0]],
             Production {
                 symbols: vec![token_span("a", a_span)],
                 precedence: None,
@@ -1217,7 +1217,7 @@ mod test {
         assert_eq!(&src[a_span.start()..a_span.end()], "a");
         let b_span = Span::new(54, 55);
         assert_eq!(
-            grm.prods[grm.get_rule("A").unwrap().pidxs[1]],
+            grm.prods()[grm.get_rule("A").unwrap().pidxs[1]],
             Production {
                 symbols: vec![token_span("b", Span::new(54, 55))],
                 precedence: None,
@@ -1243,7 +1243,7 @@ mod test {
         .unwrap();
 
         assert_eq!(
-            grm.prods[grm.get_rule("A").unwrap().pidxs[0]],
+            grm.prods()[grm.get_rule("A").unwrap().pidxs[0]],
             Production {
                 symbols: vec![Symbol::Empty(Span::new(32, 32))],
                 precedence: None,
@@ -1253,7 +1253,7 @@ mod test {
 
         let b_span = Span::new(51, 52);
         assert_eq!(
-            grm.prods[grm.get_rule("B").unwrap().pidxs[0]],
+            grm.prods()[grm.get_rule("B").unwrap().pidxs[0]],
             Production {
                 symbols: vec![token_span("b", b_span)],
                 precedence: None,
@@ -1262,7 +1262,7 @@ mod test {
         );
         assert_eq!(&src[b_span.start()..b_span.end()], "b");
         assert_eq!(
-            grm.prods[grm.get_rule("B").unwrap().pidxs[1]],
+            grm.prods()[grm.get_rule("B").unwrap().pidxs[1]],
             Production {
                 symbols: vec![Symbol::Empty(Span::new(56, 56))],
                 precedence: None,
@@ -1271,7 +1271,7 @@ mod test {
         );
 
         assert_eq!(
-            grm.prods[grm.get_rule("C").unwrap().pidxs[0]],
+            grm.prods()[grm.get_rule("C").unwrap().pidxs[0]],
             Production {
                 symbols: vec![Symbol::Empty(Span::new(74, 74))],
                 precedence: None,
@@ -1280,7 +1280,7 @@ mod test {
         );
         let c_span = Span::new(77, 78);
         assert_eq!(
-            grm.prods[grm.get_rule("C").unwrap().pidxs[1]],
+            grm.prods()[grm.get_rule("C").unwrap().pidxs[1]],
             Production {
                 symbols: vec![token_span("c", c_span)],
                 precedence: None,
@@ -1311,7 +1311,7 @@ mod test {
         let a_span = Span::new(8, 9);
         let b_span = Span::new(11, 12);
         assert_eq!(
-            grm.prods[grm.get_rule("A").unwrap().pidxs[0]],
+            grm.prods()[grm.get_rule("A").unwrap().pidxs[0]],
             Production {
                 symbols: vec![token_span("a", a_span), rule_span("B", b_span)],
                 precedence: None,
@@ -1333,7 +1333,7 @@ mod test {
         let a_span = Span::new(8, 9);
         let b_span = Span::new(12, 13);
         assert_eq!(
-            grm.prods[grm.get_rule("A").unwrap().pidxs[0]],
+            grm.prods()[grm.get_rule("A").unwrap().pidxs[0]],
             Production {
                 symbols: vec![token_span("a", a_span), token_span("b", b_span)],
                 precedence: None,
@@ -1412,7 +1412,7 @@ mod test {
         assert!(grm.has_token("T"));
         let t_span = Span::new(16, 17);
         assert_eq!(
-            grm.prods[grm.get_rule("A").unwrap().pidxs[0]],
+            grm.prods()[grm.get_rule("A").unwrap().pidxs[0]],
             Production {
                 symbols: vec![token_span("T", t_span)],
                 precedence: None,
@@ -1732,10 +1732,10 @@ x"
         ";
         let grm = parse(YaccKind::Original(YaccOriginalActionKind::GenericParseTree), src).unwrap();
         assert_eq!(grm.precs.len(), 4);
-        assert_eq!(grm.prods[grm.rules["expr"].pidxs[0]].precedence, None);
-        assert_eq!(grm.prods[grm.rules["expr"].pidxs[3]].symbols.len(), 3);
-        assert_eq!(grm.prods[grm.rules["expr"].pidxs[4]].symbols.len(), 2);
-        assert_eq!(grm.prods[grm.rules["expr"].pidxs[4]].precedence, Some("*".to_string()));
+        assert_eq!(grm.prods()[grm.rules["expr"].pidxs[0]].precedence, None);
+        assert_eq!(grm.prods()[grm.rules["expr"].pidxs[3]].symbols.len(), 3);
+        assert_eq!(grm.prods()[grm.rules["expr"].pidxs[4]].symbols.len(), 2);
+        assert_eq!(grm.prods()[grm.rules["expr"].pidxs[4]].precedence, Some("*".to_string()));
     }
 
     #[test]
@@ -2209,14 +2209,14 @@ x"
         )
         .unwrap();
         assert_eq!(
-            grm.prods[grm.rules["A"].pidxs[0]].action,
+            grm.prods()[grm.rules["A"].pidxs[0]].action,
             Some("println!(\"test\");".to_string())
         );
         assert_eq!(
-            grm.prods[grm.rules["B"].pidxs[0]].action,
+            grm.prods()[grm.rules["B"].pidxs[0]].action,
             Some("add($1, $2);".to_string())
         );
-        assert_eq!(grm.prods[grm.rules["B"].pidxs[1]].action, None);
+        assert_eq!(grm.prods()[grm.rules["B"].pidxs[1]].action, None);
     }
 
     #[test]
@@ -2227,7 +2227,7 @@ x"
         )
         .unwrap();
         assert_eq!(
-            grm.prods[grm.rules["A"].pidxs[0]].action,
+            grm.prods()[grm.rules["A"].pidxs[0]].action,
             Some("(); // 🦀".to_string())
         );
     }
@@ -2400,7 +2400,7 @@ Expr -> () : D;
         let expr_rule = ast.get_rule("Expr").unwrap();
         let mut prod_names = HashSet::new();
         for pidx in &expr_rule.pidxs {
-            for sym in &ast.prods[*pidx].symbols {
+            for sym in &ast.prods()[*pidx].symbols {
                 let name = match sym {
                     Symbol::Token(name, _) | Symbol::Rule(name, _) => name.clone(),
                     Symbol::Empty(_) => "%empty".to_string(),
@@ -2408,7 +2408,7 @@ Expr -> () : D;
                 prod_names.insert(name);
             }
         }
-        assert_eq!(ast.prods.len(), 5);
+        assert_eq!(ast.prods().len(), 5);
         assert_eq!(
             prod_names,
             HashSet::from_iter(["A", "B", "C", "D", "%empty"].map(|s| s.to_owned()))

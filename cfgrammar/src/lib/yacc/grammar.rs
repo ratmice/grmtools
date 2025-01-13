@@ -126,10 +126,10 @@ where
         if ast.tokens.len() > num_traits::cast(StorageT::max_value()).unwrap() {
             panic!("StorageT is not big enough to store this grammar's tokens.");
         }
-        if ast.prods.len() > num_traits::cast(StorageT::max_value()).unwrap() {
+        if ast.prods().len() > num_traits::cast(StorageT::max_value()).unwrap() {
             panic!("StorageT is not big enough to store this grammar's productions.");
         }
-        for p in &ast.prods {
+        for p in ast.prods() {
             if p.symbols.len() > num_traits::cast(StorageT::max_value()).unwrap() {
                 panic!("StorageT is not big enough to store the symbols of at least one of this grammar's productions.");
             }
@@ -216,10 +216,10 @@ where
         // In order to avoid fiddling about with production indices from the AST, we simply map
         // tem 1:1 to grammar indices. That means that any new productions are added to the *end*
         // of the list of productions.
-        let mut prods = vec![None; ast.prods.len()];
-        let mut prod_precs: Vec<Option<Option<Precedence>>> = vec![None; ast.prods.len()];
-        let mut prods_rules = vec![None; ast.prods.len()];
-        let mut actions = vec![None; ast.prods.len()];
+        let mut prods = vec![None; ast.prods().len()];
+        let mut prod_precs: Vec<Option<Option<Precedence>>> = vec![None; ast.prods().len()];
+        let mut prods_rules = vec![None; ast.prods().len()];
+        let mut actions = vec![None; ast.prods().len()];
         let mut actiontypes = vec![None; rule_names.len()];
         let (start_name, _) = ast.start.as_ref().unwrap();
         for (astrulename, _) in &rule_names {
@@ -282,7 +282,7 @@ where
 
             let rule = &mut rules_prods[usize::from(ridx)];
             for &pidx in &ast.rules[astrulename].pidxs {
-                let astprod = &ast.prods[pidx];
+                let astprod = &ast.prods()[pidx];
                 let mut prod = Vec::with_capacity(astprod.symbols.len());
                 for astsym in &astprod.symbols {
                     match *astsym {

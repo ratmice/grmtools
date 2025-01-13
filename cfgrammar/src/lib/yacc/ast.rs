@@ -65,7 +65,7 @@ pub struct GrammarAST {
     pub start: Option<(String, Span)>,
     // map from a rule name to indexes into prods
     pub rules: IndexMap<String, Rule>,
-    pub prods: Vec<Production>,
+    prods: Vec<Production>,
     pub tokens: IndexSet<String>,
     pub spans: Vec<Span>,
     pub precs: HashMap<String, (Precedence, Span)>,
@@ -184,6 +184,10 @@ impl GrammarAST {
             precedence,
             action,
         });
+    }
+
+    pub fn prods(&self) -> &[Production] {
+        self.prods.as_slice()
     }
 
     #[deprecated(since = "0.10.2", note = "Please use set_programs instead")]

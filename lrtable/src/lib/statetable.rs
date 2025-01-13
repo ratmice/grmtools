@@ -1010,7 +1010,7 @@ S: S | ;";
                 kind: StateTableErrorKind::AcceptReduceConflict(r_pidx),
                 pidx,
             }) if pidx == PIdx(2) => {
-                assert!(ast_validity.ast().prods.len() <= usize::from(pidx));
+                assert!(ast_validity.ast().prods().len() <= usize::from(pidx));
                 // Note that we expect `pidx` to occur at the implicit start symbol `^`
                 // which is not present in the AST but is present in the grammar.
                 //
@@ -1033,8 +1033,8 @@ S: S | ;";
                 // A span for a production within S may be obtained from the r_pidx in this case
                 assert!(r_pidx.is_some());
                 let r_pidx = r_pidx.unwrap();
-                assert!(ast_validity.ast().prods.len() >= usize::from(r_pidx));
-                let prod = &ast_validity.ast().prods[usize::from(r_pidx)];
+                assert!(ast_validity.ast().prods().len() >= usize::from(r_pidx));
+                let prod = &ast_validity.ast().prods()[usize::from(r_pidx)];
                 let symbols = &prod.symbols;
                 assert_eq!(symbols.len(), 1);
                 let sym = symbols.first().unwrap();
@@ -1063,10 +1063,10 @@ T: S | ;";
                 kind: StateTableErrorKind::AcceptReduceConflict(None),
                 pidx,
             }) if pidx == PIdx(2) => {
-                assert!(ast_validity.ast().prods.len() > usize::from(pidx));
+                assert!(ast_validity.ast().prods().len() > usize::from(pidx));
                 // We expect this one to have a symbol in the ast.
                 // We can get a span for the RHS "S" at "S |" in rule T.
-                let prod = &ast_validity.ast().prods[usize::from(pidx)];
+                let prod = &ast_validity.ast().prods()[usize::from(pidx)];
                 let symbols = &prod.symbols;
                 assert_eq!(symbols.len(), 1);
                 let sym = symbols.first().unwrap();
