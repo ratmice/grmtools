@@ -727,258 +727,248 @@ where
         } else {
             read_to_string(grmp).map_err(|e| format!("When reading '{}': {e}", grmp.display()))?
         };
-
         let yacc_diag = SpannedDiagnosticFormatter::new(&inc, grmp);
         let parsed_header = GrmtoolsSectionParser::new(&inc, false).parse();
-        match parsed_header {
+        if let Err(errs) = parsed_header {
+            let mut out = String::new();
+            out.push_str(&format!(
+                "\n{ERROR}{}\n",
+                yacc_diag.file_location_msg(" parsing the `%grmtools` section", None)
+            ));
+            for e in errs {
+                out.push_str(&indent("     ", &yacc_diag.format_error(e).to_string()));
+            }
+            return Err(ErrorString(out).into());
+        };
+        let (parsed_header, _) = parsed_header.unwrap();
+        header.merge_from(parsed_header)?;
+        self.yacckind = header
+            .get("yacckind")
+            .map(|HeaderValue(_, val)| val)
+            .map(YaccKind::try_from)
+            .transpose()?;
+        header.mark_used(&"yacckind".to_string());
+        let ast_validation = if let Some(ast) = &self.from_ast {
+            ast.clone()
+        } else if let Some(yk) = self.yacckind {
+            ASTWithValidityInfo::new(yk, &inc)
+        } else {
+            Err("Missing 'yacckind'".to_string())?
+        };
+
+        header.mark_used(&"recoverer".to_string());
+        let rk_val = header.get("recoverer").map(|HeaderValue(_, rk_val)| rk_val);
+
+        if let Some(rk_val) = rk_val {
+            self.recoverer = Some(RecoveryKind::try_from(rk_val)?);
+        } else {
+            // Fallback to the default recoverykind.
+            self.recoverer = Some(RecoveryKind::CPCTPlus);
+        }
+        header.mark_used(&"serialisation_format".to_string());
+        if let Some(ec_val) = header
+            .get("serialisation_format")
+            .map(|HeaderValue(_, ec_val)| ec_val)
+        {
+            self.serialisation_format = Some(SerialisationFormat::try_from(ec_val)?);
+        } else {
+            self.serialisation_format = Some(SerialisationFormat::VariableSizedInteger);
+        }
+
+        self.yacckind = Some(ast_validation.yacc_kind());
+        let warnings = ast_validation.ast().warnings();
+        if self.warnings_are_errors && !warnings.is_empty() {
+            let mut out = String::new();
+            out.push_str(&format!(
+                "\n{ERROR}{}\n",
+                yacc_diag.file_location_msg("", None)
+            ));
+            for e in warnings {
+                out.push_str(&format!(
+                    "{}\n",
+                    indent("     ", &yacc_diag.format_warning(e).to_string())
+                ));
+            }
+            return Err(ErrorString(out).into());
+        } else if !warnings.is_empty() {
+            for w in warnings {
+                let ws_loc = yacc_diag.file_location_msg("", None);
+                let ws = indent("     ", &yacc_diag.format_warning(w).to_string());
+                // Assume if this variable is set we are running under cargo.
+                if std::env::var("OUT_DIR").is_ok() && self.show_warnings {
+                    for line in ws_loc.lines().chain(ws.lines()) {
+                        println!("cargo:warning={}", line);
+                    }
+                } else if self.show_warnings {
+                    eprintln!("{}", ws_loc);
+                    eprintln!("{WARNING} {}", ws);
+                }
+            }
+        }
+        let grm = match YaccGrammar::<StorageT>::new_from_ast_with_validity_info(&ast_validation) {
+            Ok(grm) => grm,
             Err(errs) => {
                 let mut out = String::new();
                 out.push_str(&format!(
                     "\n{ERROR}{}\n",
-                    yacc_diag.file_location_msg(" parsing the `%grmtools` section", None)
+                    yacc_diag.file_location_msg("", None)
                 ));
                 for e in errs {
                     out.push_str(&indent("     ", &yacc_diag.format_error(e).to_string()));
+                    out.push('\n');
                 }
-                return Err(ErrorString(out))?;
+                return Err(ErrorString(out).into());
             }
-            Ok((parsed_header, _)) => {
-                header.merge_from(parsed_header)?;
-                self.yacckind = header
-                    .get("yacckind")
-                    .map(|HeaderValue(_, val)| val)
-                    .map(YaccKind::try_from)
-                    .transpose()?;
-                header.mark_used(&"yacckind".to_string());
-                let ast_validation = if let Some(ast) = &self.from_ast {
-                    ast.clone()
-                } else if let Some(yk) = self.yacckind {
-                    ASTWithValidityInfo::new(yk, &inc)
-                } else {
-                    Err("Missing 'yacckind'".to_string())?
-                };
+        };
+        #[cfg(test)]
+        if let Some(cb) = &self.inspect_callback {
+            cb(self.recoverer.expect("has a default value"))?;
+        }
 
-                header.mark_used(&"recoverer".to_string());
-                let rk_val = header.get("recoverer").map(|HeaderValue(_, rk_val)| rk_val);
+        let rule_ids = grm
+            .tokens_map()
+            .iter()
+            .map(|(&n, &i)| (n.to_owned(), i.as_storaget()))
+            .collect::<HashMap<_, _>>();
 
-                if let Some(rk_val) = rk_val {
-                    self.recoverer = Some(RecoveryKind::try_from(rk_val)?);
-                } else {
-                    // Fallback to the default recoverykind.
-                    self.recoverer = Some(RecoveryKind::CPCTPlus);
-                }
-                header.mark_used(&"serialisation_format".to_string());
-                if let Some(ec_val) = header
-                    .get("serialisation_format")
-                    .map(|HeaderValue(_, ec_val)| ec_val)
-                {
-                    self.serialisation_format = Some(SerialisationFormat::try_from(ec_val)?);
-                } else {
-                    self.serialisation_format = Some(SerialisationFormat::VariableSizedInteger);
-                }
-
-                self.yacckind = Some(ast_validation.yacc_kind());
-                let warnings = ast_validation.ast().warnings();
-                let res = YaccGrammar::<StorageT>::new_from_ast_with_validity_info(&ast_validation);
-                let grm = match res {
-                    Ok(_) if self.warnings_are_errors && !warnings.is_empty() => {
-                        let mut out = String::new();
-                        out.push_str(&format!(
-                            "\n{ERROR}{}\n",
-                            yacc_diag.file_location_msg("", None)
-                        ));
-                        for e in warnings {
-                            out.push_str(&format!(
-                                "{}\n",
-                                indent("     ", &yacc_diag.format_warning(e).to_string())
-                            ));
-                        }
-                        return Err(ErrorString(out))?;
+        let derived_mod_name = match self.mod_name {
+            Some(s) => s.to_owned(),
+            None => {
+                // The user hasn't specified a module name, so we create one automatically: what we
+                // do is strip off all the filename extensions (note that it's likely that inp ends
+                // with `y.rs`, so we potentially have to strip off more than one extension) and
+                // then add `_y` to the end.
+                let mut stem = grmp.to_str().unwrap();
+                loop {
+                    let new_stem = Path::new(stem).file_stem().unwrap().to_str().unwrap();
+                    if stem == new_stem {
+                        break;
                     }
-                    Ok(grm) => {
-                        if !warnings.is_empty() {
-                            for w in warnings {
-                                let ws_loc = yacc_diag.file_location_msg("", None);
-                                let ws = indent("     ", &yacc_diag.format_warning(w).to_string());
-                                // Assume if this variable is set we are running under cargo.
-                                if std::env::var("OUT_DIR").is_ok() && self.show_warnings {
-                                    for line in ws_loc.lines().chain(ws.lines()) {
-                                        println!("cargo:warning={}", line);
-                                    }
-                                } else if self.show_warnings {
-                                    eprintln!("{}", ws_loc);
-                                    eprintln!("{WARNING} {}", ws);
-                                }
-                            }
-                        }
-                        grm
-                    }
-                    Err(errs) => {
-                        let mut out = String::new();
-                        out.push_str(&format!(
-                            "\n{ERROR}{}\n",
-                            yacc_diag.file_location_msg("", None)
-                        ));
-                        for e in errs {
-                            out.push_str(&indent("     ", &yacc_diag.format_error(e).to_string()));
-                            out.push('\n');
-                        }
-
-                        return Err(ErrorString(out))?;
-                    }
-                };
-
-                #[cfg(test)]
-                if let Some(cb) = &self.inspect_callback {
-                    cb(self.recoverer.expect("has a default value"))?;
+                    stem = new_stem;
                 }
+                format!("{}_y", stem)
+            }
+        };
 
-                let rule_ids = grm
-                    .tokens_map()
-                    .iter()
-                    .map(|(&n, &i)| (n.to_owned(), i.as_storaget()))
-                    .collect::<HashMap<_, _>>();
+        let cache = self.rebuild_cache(&derived_mod_name, &grm);
 
-                let derived_mod_name = match self.mod_name {
-                    Some(s) => s.to_owned(),
-                    None => {
-                        // The user hasn't specified a module name, so we create one automatically: what we
-                        // do is strip off all the filename extensions (note that it's likely that inp ends
-                        // with `y.rs`, so we potentially have to strip off more than one extension) and
-                        // then add `_y` to the end.
-                        let mut stem = grmp.to_str().unwrap();
-                        loop {
-                            let new_stem = Path::new(stem).file_stem().unwrap().to_str().unwrap();
-                            if stem == new_stem {
-                                break;
-                            }
-                            stem = new_stem;
-                        }
-                        format!("{}_y", stem)
-                    }
-                };
-
-                let cache = self.rebuild_cache(&derived_mod_name, &grm);
-
-                // We don't need to go through the full rigmarole of generating an output file if all of
-                // the following are true: the output file exists; it is newer than the input file; and the
-                // cache hasn't changed. The last of these might be surprising, but it's vital: we don't
-                // know, for example, what the IDs map might be from one run to the next, and it might
-                // change for reasons beyond lrpar's control. If it does change, that means that the lexer
-                // and lrpar would get out of sync, so we have to play it safe and regenerate in such
-                // cases.
-                if let Ok(ref inmd) = fs::metadata(grmp)
-                    && let Ok(ref out_rs_md) = fs::metadata(outp)
-                    && FileTime::from_last_modification_time(out_rs_md)
-                        > FileTime::from_last_modification_time(inmd)
-                    && let Ok(outc) = read_to_string(outp)
-                {
-                    if outc.contains(&cache.to_string()) {
-                        return Ok(CTParser {
-                            regenerated: false,
-                            rule_ids,
-                            yacc_grammar: grm,
-                            grammar_src: inc,
-                            grammar_path: self.grammar_path.unwrap(),
-                            conflicts: None,
-                        });
-                    } else {
-                        #[cfg(grmtools_extra_checks)]
-                        if std::env::var("CACHE_EXPECTED").is_ok() {
-                            eprintln!("outc: {}", outc);
-                            eprintln!("using cache: {}", cache,);
-                            // Primarily for use in the testsuite.
-                            panic!("The cache regenerated however, it was expected to match");
-                        }
-                    }
-                }
-
-                // At this point, we know we're going to generate fresh output; however, if something goes
-                // wrong in the process between now and us writing /out/blah.rs, rustc thinks that
-                // everything's gone swimmingly (even if build.rs errored!), and tries to carry on
-                // compilation, leading to weird errors. We therefore delete /out/blah.rs at this point,
-                // which means, at worse, the user gets a "file not found" error from rustc (which is less
-                // confusing than the alternatives).
-                fs::remove_file(outp).ok();
-
-                let (sgraph, stable) = from_yacc(&grm, Minimiser::Pager)?;
-                if self.error_on_conflicts
-                    && let Some(c) = stable.conflicts()
-                {
-                    match (grm.expect(), grm.expectrr()) {
-                        (Some(i), Some(j)) if i == c.sr_len() && j == c.rr_len() => (),
-                        (Some(i), None) if i == c.sr_len() && 0 == c.rr_len() => (),
-                        (None, Some(j)) if 0 == c.sr_len() && j == c.rr_len() => (),
-                        (None, None) if 0 == c.rr_len() && 0 == c.sr_len() => (),
-                        _ => {
-                            let conflicts_diagnostic = yacc_diag.format_conflicts::<LexerTypesT>(
-                                &grm,
-                                ast_validation.ast(),
-                                c,
-                                &sgraph,
-                                &stable,
-                            );
-                            return Err(Box::new(CTConflictsError {
-                                conflicts_diagnostic,
-                                phantom: PhantomData,
-                                #[cfg(test)]
-                                stable,
-                            }));
-                        }
-                    }
-                }
-
-                if let Some(ref mut inspector_rt) = self.inspect_rt {
-                    let rt: RTParserBuilder<'_, StorageT, LexerTypesT> =
-                        RTParserBuilder::new(&grm, &stable);
-                    let rt = if let Some(rk) = self.recoverer {
-                        rt.recoverer(rk)
-                    } else {
-                        rt
-                    };
-                    inspector_rt(&mut header, rt, &rule_ids, grmp)?
-                }
-
-                let unused_keys = header.unused();
-                if !unused_keys.is_empty() {
-                    return Err(format!("Unused keys in header: {}", unused_keys.join(", ")).into());
-                }
-                let missing_keys = header
-                    .missing()
-                    .iter()
-                    .map(|s| s.as_str())
-                    .collect::<Vec<_>>();
-                if !missing_keys.is_empty() {
-                    return Err(format!(
-                        "Required values were missing from the header: {}",
-                        missing_keys.join(", ")
-                    )
-                    .into());
-                }
-
-                self.output_file(
-                    &grm,
-                    &stable,
-                    &derived_mod_name,
-                    outp,
-                    &format!("/* CACHE INFORMATION {} */\n", cache),
-                    &yacc_diag,
-                )?;
-                let conflicts = if stable.conflicts().is_some() {
-                    Some((sgraph, stable))
-                } else {
-                    None
-                };
-                Ok(CTParser {
-                    regenerated: true,
+        // We don't need to go through the full rigmarole of generating an output file if all of
+        // the following are true: the output file exists; it is newer than the input file; and the
+        // cache hasn't changed. The last of these might be surprising, but it's vital: we don't
+        // know, for example, what the IDs map might be from one run to the next, and it might
+        // change for reasons beyond lrpar's control. If it does change, that means that the lexer
+        // and lrpar would get out of sync, so we have to play it safe and regenerate in such
+        // cases.
+        if let Ok(ref inmd) = fs::metadata(grmp)
+            && let Ok(ref out_rs_md) = fs::metadata(outp)
+            && FileTime::from_last_modification_time(out_rs_md)
+                > FileTime::from_last_modification_time(inmd)
+            && let Ok(outc) = read_to_string(outp)
+        {
+            if outc.contains(&cache.to_string()) {
+                return Ok(CTParser {
+                    regenerated: false,
                     rule_ids,
                     yacc_grammar: grm,
                     grammar_src: inc,
                     grammar_path: self.grammar_path.unwrap(),
-                    conflicts,
-                })
+                    conflicts: None,
+                });
+            } else {
+                #[cfg(grmtools_extra_checks)]
+                if std::env::var("CACHE_EXPECTED").is_ok() {
+                    eprintln!("outc: {}", outc);
+                    eprintln!("using cache: {}", cache,);
+                    // Primarily for use in the testsuite.
+                    panic!("The cache regenerated however, it was expected to match");
+                }
             }
         }
+
+        // At this point, we know we're going to generate fresh output; however, if something goes
+        // wrong in the process between now and us writing /out/blah.rs, rustc thinks that
+        // everything's gone swimmingly (even if build.rs errored!), and tries to carry on
+        // compilation, leading to weird errors. We therefore delete /out/blah.rs at this point,
+        // which means, at worse, the user gets a "file not found" error from rustc (which is less
+        // confusing than the alternatives).
+        fs::remove_file(outp).ok();
+
+        let (sgraph, stable) = from_yacc(&grm, Minimiser::Pager)?;
+        if self.error_on_conflicts
+            && let Some(c) = stable.conflicts()
+        {
+            match (grm.expect(), grm.expectrr()) {
+                (Some(i), Some(j)) if i == c.sr_len() && j == c.rr_len() => (),
+                (Some(i), None) if i == c.sr_len() && 0 == c.rr_len() => (),
+                (None, Some(j)) if 0 == c.sr_len() && j == c.rr_len() => (),
+                (None, None) if 0 == c.rr_len() && 0 == c.sr_len() => (),
+                _ => {
+                    let conflicts_diagnostic = yacc_diag.format_conflicts::<LexerTypesT>(
+                        &grm,
+                        ast_validation.ast(),
+                        c,
+                        &sgraph,
+                        &stable,
+                    );
+                    return Err(Box::new(CTConflictsError {
+                        conflicts_diagnostic,
+                        phantom: PhantomData,
+                        #[cfg(test)]
+                        stable,
+                    }));
+                }
+            }
+        }
+
+        if let Some(ref mut inspector_rt) = self.inspect_rt {
+            let rt: RTParserBuilder<'_, StorageT, LexerTypesT> =
+                RTParserBuilder::new(&grm, &stable);
+            let rt = if let Some(rk) = self.recoverer {
+                rt.recoverer(rk)
+            } else {
+                rt
+            };
+            inspector_rt(&mut header, rt, &rule_ids, grmp)?
+        }
+
+        let unused_keys = header.unused();
+        if !unused_keys.is_empty() {
+            return Err(format!("Unused keys in header: {}", unused_keys.join(", ")).into());
+        }
+        let missing_keys = header
+            .missing()
+            .iter()
+            .map(|s| s.as_str())
+            .collect::<Vec<_>>();
+        if !missing_keys.is_empty() {
+            return Err(format!(
+                "Required values were missing from the header: {}",
+                missing_keys.join(", ")
+            )
+            .into());
+        }
+
+        self.output_file(
+            &grm,
+            &stable,
+            &derived_mod_name,
+            outp,
+            &format!("/* CACHE INFORMATION {} */\n", cache),
+            &yacc_diag,
+        )?;
+        let conflicts = if stable.conflicts().is_some() {
+            Some((sgraph, stable))
+        } else {
+            None
+        };
+        Ok(CTParser {
+            regenerated: true,
+            rule_ids,
+            yacc_grammar: grm,
+            grammar_src: inc,
+            grammar_path: self.grammar_path.unwrap(),
+            conflicts,
+        })
     }
 
     /// Given the filename `a/b.y` as input, statically compile the grammar `src/a/b.y` into a Rust
