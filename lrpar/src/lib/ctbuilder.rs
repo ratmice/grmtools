@@ -16,6 +16,7 @@ use std::{
 
 use crate::{
     LexerTypes, RTParserBuilder, RecoveryKind,
+    codegen::{ParserBuildEnv, ParserBuildEnvArgs, ParserSrcEnv},
     diagnostics::{DiagnosticFormatter, SpannedDiagnosticFormatter},
 };
 
@@ -24,10 +25,7 @@ use crate::unstable_api::UnstableApi;
 
 use cfgrammar::{
     Location, RIdx, Span, Symbol,
-    header::{
-        GrmtoolsSectionParser, Header, HeaderError, HeaderErrorKind, HeaderValue, Namespaced,
-        Setting, Value,
-    },
+    header::{Header, HeaderError, HeaderErrorKind, HeaderValue, Namespaced, Setting, Value},
     markmap::{Entry, MergeBehavior},
     yacc::{YaccGrammar, YaccKind, YaccOriginalActionKind, ast::ASTWithValidityInfo},
 };
@@ -48,7 +46,7 @@ const ACTIONS_KIND_HIDDEN: &str = "__GtActionsKindHidden";
 const RUST_FILE_EXT: &str = "rs";
 
 const WARNING: &str = "[Warning]";
-const ERROR: &str = "[Error]";
+pub(crate) const ERROR: &str = "[Error]";
 
 static GENERATED_PATHS: LazyLock<Mutex<HashSet<PathBuf>>> =
     LazyLock::new(|| Mutex::new(HashSet::new()));
@@ -727,73 +725,38 @@ where
         } else {
             read_to_string(grmp).map_err(|e| format!("When reading '{}': {e}", grmp.display()))?
         };
-        let yacc_diag = SpannedDiagnosticFormatter::new(&inc, grmp);
-        let parsed_header = GrmtoolsSectionParser::new(&inc, false).parse();
-        if let Err(errs) = parsed_header {
-            let mut out = String::new();
-            out.push_str(&format!(
-                "\n{ERROR}{}\n",
-                yacc_diag.file_location_msg(" parsing the `%grmtools` section", None)
-            ));
-            for e in errs {
-                out.push_str(&indent("     ", &yacc_diag.format_error(e).to_string()));
-            }
-            return Err(ErrorString(out).into());
-        };
-        let (parsed_header, _) = parsed_header.unwrap();
-        header.merge_from(parsed_header)?;
-        self.yacckind = header
-            .get("yacckind")
-            .map(|HeaderValue(_, val)| val)
-            .map(YaccKind::try_from)
-            .transpose()?;
-        header.mark_used(&"yacckind".to_string());
-        let ast_validation = if let Some(ast) = &self.from_ast {
-            ast.clone()
-        } else if let Some(yk) = self.yacckind {
-            ASTWithValidityInfo::new(yk, &inc)
-        } else {
-            Err("Missing 'yacckind'".to_string())?
-        };
 
-        header.mark_used(&"recoverer".to_string());
-        let rk_val = header.get("recoverer").map(|HeaderValue(_, rk_val)| rk_val);
+        let mut src_env = ParserSrcEnv::new_with_defaults(&inc, grmp, header);
+        let build_args = ParserBuildEnvArgs::new()
+            .ast_originated(self.from_ast.as_ref())
+            .mod_name(self.mod_name)
+            .show_warnings(self.show_warnings)
+            .error_on_conflicts(self.error_on_conflicts)
+            .warnings_are_errors(self.warnings_are_errors);
+        let build_env = src_env.build_env::<LexerTypesT>(build_args)?;
+        // Temporarily we update self.yacckind and self.recoverer from the build_env
+        // Until codegen reads these variables from the build_env directly.
+        self.recoverer = Some(build_env.recoverer);
+        self.yacckind = Some(build_env.ast_validation().yacc_kind());
 
-        if let Some(rk_val) = rk_val {
-            self.recoverer = Some(RecoveryKind::try_from(rk_val)?);
-        } else {
-            // Fallback to the default recoverykind.
-            self.recoverer = Some(RecoveryKind::CPCTPlus);
-        }
-        header.mark_used(&"serialisation_format".to_string());
-        if let Some(ec_val) = header
-            .get("serialisation_format")
-            .map(|HeaderValue(_, ec_val)| ec_val)
-        {
-            self.serialisation_format = Some(SerialisationFormat::try_from(ec_val)?);
-        } else {
-            self.serialisation_format = Some(SerialisationFormat::VariableSizedInteger);
-        }
-
-        self.yacckind = Some(ast_validation.yacc_kind());
-        let warnings = ast_validation.ast().warnings();
+        let warnings = build_env.ast_validation().ast().warnings();
         if self.warnings_are_errors && !warnings.is_empty() {
             let mut out = String::new();
             out.push_str(&format!(
                 "\n{ERROR}{}\n",
-                yacc_diag.file_location_msg("", None)
+                src_env.yacc_diag().file_location_msg("", None)
             ));
             for e in warnings {
                 out.push_str(&format!(
                     "{}\n",
-                    indent("     ", &yacc_diag.format_warning(e).to_string())
+                    indent("     ", &src_env.yacc_diag().format_warning(e).to_string())
                 ));
             }
             return Err(ErrorString(out).into());
         } else if !warnings.is_empty() {
             for w in warnings {
-                let ws_loc = yacc_diag.file_location_msg("", None);
-                let ws = indent("     ", &yacc_diag.format_warning(w).to_string());
+                let ws_loc = src_env.yacc_diag().file_location_msg("", None);
+                let ws = indent("     ", &src_env.yacc_diag().format_warning(w).to_string());
                 // Assume if this variable is set we are running under cargo.
                 if std::env::var("OUT_DIR").is_ok() && self.show_warnings {
                     for line in ws_loc.lines().chain(ws.lines()) {
@@ -805,16 +768,21 @@ where
                 }
             }
         }
-        let grm = match YaccGrammar::<StorageT>::new_from_ast_with_validity_info(&ast_validation) {
+        let grm = match YaccGrammar::<StorageT>::new_from_ast_with_validity_info(
+            build_env.ast_validation(),
+        ) {
             Ok(grm) => grm,
             Err(errs) => {
                 let mut out = String::new();
                 out.push_str(&format!(
                     "\n{ERROR}{}\n",
-                    yacc_diag.file_location_msg("", None)
+                    src_env.yacc_diag().file_location_msg("", None)
                 ));
                 for e in errs {
-                    out.push_str(&indent("     ", &yacc_diag.format_error(e).to_string()));
+                    out.push_str(&indent(
+                        "     ",
+                        &src_env.yacc_diag().format_error(e).to_string(),
+                    ));
                     out.push('\n');
                 }
                 return Err(ErrorString(out).into());
@@ -903,9 +871,9 @@ where
                 (None, Some(j)) if 0 == c.sr_len() && j == c.rr_len() => (),
                 (None, None) if 0 == c.rr_len() && 0 == c.sr_len() => (),
                 _ => {
-                    let conflicts_diagnostic = yacc_diag.format_conflicts::<LexerTypesT>(
+                    let conflicts_diagnostic = src_env.yacc_diag().format_conflicts::<LexerTypesT>(
                         &grm,
-                        ast_validation.ast(),
+                        build_env.ast_validation().ast(),
                         c,
                         &sgraph,
                         &stable,
@@ -928,14 +896,15 @@ where
             } else {
                 rt
             };
-            inspector_rt(&mut header, rt, &rule_ids, grmp)?
+            inspector_rt(src_env.header_mut(), rt, &rule_ids, grmp)?
         }
 
-        let unused_keys = header.unused();
+        let unused_keys = src_env.header().unused();
         if !unused_keys.is_empty() {
             return Err(format!("Unused keys in header: {}", unused_keys.join(", ")).into());
         }
-        let missing_keys = header
+        let missing_keys = src_env
+            .header()
             .missing()
             .iter()
             .map(|s| s.as_str())
@@ -954,7 +923,8 @@ where
             &derived_mod_name,
             outp,
             &format!("/* CACHE INFORMATION {} */\n", cache),
-            &yacc_diag,
+            src_env.yacc_diag(),
+            &build_env,
         )?;
         let conflicts = if stable.conflicts().is_some() {
             Some((sgraph, stable))
@@ -1084,6 +1054,7 @@ where
         outp_rs: P,
         cache: &str,
         diag: &SpannedDiagnosticFormatter,
+        build_env: &ParserBuildEnv<'_, LexerTypesT>,
     ) -> Result<(), Box<dyn Error>> {
         let visibility = self.visibility.clone();
         let user_actions = if let Some(
@@ -1096,7 +1067,7 @@ where
         };
         let rule_consts = self.gen_rule_consts(grm)?;
         let token_epp = self.gen_token_epp(grm)?;
-        let parse_function = self.gen_parse_function(grm, stable)?;
+        let parse_function = self.gen_parse_function(grm, stable, build_env)?;
         let action_wrappers = match self.yacckind.unwrap() {
             YaccKind::Original(YaccOriginalActionKind::UserAction) | YaccKind::Grmtools => {
                 Some(self.gen_wrappers(grm)?)
@@ -1234,6 +1205,7 @@ where
         &self,
         grm: &YaccGrammar<StorageT>,
         stable: &StateTable<StorageT>,
+        build_env: &ParserBuildEnv<'_, LexerTypesT>,
     ) -> Result<TokenStream, Box<dyn Error>> {
         let storaget = str::parse::<TokenStream>(type_name::<StorageT>())?;
         let lexertypest = str::parse::<TokenStream>(type_name::<LexerTypesT>())?;
@@ -1347,9 +1319,7 @@ where
             _ => unreachable!(),
         };
 
-        let serialisation_format = self
-            .serialisation_format
-            .expect("Should already have a default value");
+        let serialisation_format = build_env.serialisation_format();
         // Note that the configuration types use associated consts, and thus these configurations represent distinct types.
         let (grm_data, stable_data): (Vec<u8>, Vec<u8>) = match serialisation_format {
             SerialisationFormat::FixedSizeInteger => {
