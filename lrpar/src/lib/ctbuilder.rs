@@ -16,6 +16,7 @@ use std::{
 
 use crate::{
     LexerTypes, RTParserBuilder, RecoveryKind,
+    codegen::{ParserBuildEnv, ParserBuildEnvArgs, ParserSrcEnv},
     diagnostics::{DiagnosticFormatter, SpannedDiagnosticFormatter},
 };
 
@@ -24,10 +25,7 @@ use crate::unstable_api::UnstableApi;
 
 use cfgrammar::{
     Location, RIdx, Symbol,
-    header::{
-        GrmtoolsSectionParser, Header, HeaderError, HeaderErrorKind, HeaderValue, Namespaced,
-        Setting, Value,
-    },
+    header::{Header, HeaderError, HeaderErrorKind, HeaderValue, Namespaced, Setting, Value},
     markmap::{Entry, MergeBehavior},
     yacc::{YaccGrammar, YaccKind, YaccOriginalActionKind, ast::ASTWithValidityInfo},
 };
@@ -48,7 +46,7 @@ const ACTIONS_KIND_HIDDEN: &str = "__GtActionsKindHidden";
 const RUST_FILE_EXT: &str = "rs";
 
 const WARNING: &str = "[Warning]";
-const ERROR: &str = "[Error]";
+pub(crate) const ERROR: &str = "[Error]";
 
 static GENERATED_PATHS: LazyLock<Mutex<HashSet<PathBuf>>> =
     LazyLock::new(|| Mutex::new(HashSet::new()));
@@ -727,73 +725,38 @@ where
         } else {
             read_to_string(grmp).map_err(|e| format!("When reading '{}': {e}", grmp.display()))?
         };
-        let yacc_diag = SpannedDiagnosticFormatter::new(&inc, grmp);
-        let parsed_header = GrmtoolsSectionParser::new(&inc, false).parse();
-        if let Err(errs) = parsed_header {
-            let mut out = String::new();
-            out.push_str(&format!(
-                "\n{ERROR}{}\n",
-                yacc_diag.file_location_msg(" parsing the `%grmtools` section", None)
-            ));
-            for e in errs {
-                out.push_str(&indent("     ", &yacc_diag.format_error(e).to_string()));
-            }
-            return Err(ErrorString(out).into());
-        };
-        let (parsed_header, _) = parsed_header.unwrap();
-        header.merge_from(parsed_header)?;
-        self.yacckind = header
-            .get("yacckind")
-            .map(|HeaderValue(_, val)| val)
-            .map(YaccKind::try_from)
-            .transpose()?;
-        header.mark_used(&"yacckind".to_string());
-        let ast_validation = if let Some(ast) = &self.from_ast {
-            ast.clone()
-        } else if let Some(yk) = self.yacckind {
-            ASTWithValidityInfo::new(yk, &inc)
-        } else {
-            Err("Missing 'yacckind'".to_string())?
-        };
 
-        header.mark_used(&"recoverer".to_string());
-        let rk_val = header.get("recoverer").map(|HeaderValue(_, rk_val)| rk_val);
+        let mut src_env = ParserSrcEnv::new_with_header(&inc, grmp, header);
+        let build_args = ParserBuildEnvArgs::new()
+            .ast_with_validity_info(self.from_ast.as_ref())
+            .mod_name(self.mod_name)
+            .show_warnings(self.show_warnings)
+            .error_on_conflicts(self.error_on_conflicts)
+            .warnings_are_errors(self.warnings_are_errors);
+        let build_env = src_env.build_env::<LexerTypesT>(build_args)?;
+        // Temporarily we update self.yacckind and self.recoverer from the build_env
+        // Until codegen reads these variables from the build_env directly.
+        self.recoverer = Some(build_env.recoverer());
+        self.yacckind = Some(build_env.yacc_kind());
 
-        if let Some(rk_val) = rk_val {
-            self.recoverer = Some(RecoveryKind::try_from(rk_val)?);
-        } else {
-            // Fallback to the default recoverykind.
-            self.recoverer = Some(RecoveryKind::CPCTPlus);
-        }
-        header.mark_used(&"serialisation_format".to_string());
-        if let Some(ec_val) = header
-            .get("serialisation_format")
-            .map(|HeaderValue(_, ec_val)| ec_val)
-        {
-            self.serialisation_format = Some(SerialisationFormat::try_from(ec_val)?);
-        } else {
-            self.serialisation_format = Some(SerialisationFormat::VariableSizedInteger);
-        }
-
-        self.yacckind = Some(ast_validation.yacc_kind());
-        let warnings = ast_validation.ast().warnings();
+        let warnings = build_env.ast_with_validity_info().ast().warnings();
         if self.warnings_are_errors && !warnings.is_empty() {
             let mut out = String::new();
             out.push_str(&format!(
                 "\n{ERROR}{}\n",
-                yacc_diag.file_location_msg("", None)
+                src_env.yacc_diag().file_location_msg("", None)
             ));
             for e in warnings {
                 out.push_str(&format!(
                     "{}\n",
-                    indent("     ", &yacc_diag.format_warning(e).to_string())
+                    indent("     ", &src_env.yacc_diag().format_warning(e).to_string())
                 ));
             }
             return Err(ErrorString(out).into());
         } else if !warnings.is_empty() {
             for w in warnings {
-                let ws_loc = yacc_diag.file_location_msg("", None);
-                let ws = indent("     ", &yacc_diag.format_warning(w).to_string());
+                let ws_loc = src_env.yacc_diag().file_location_msg("", None);
+                let ws = indent("     ", &src_env.yacc_diag().format_warning(w).to_string());
                 // Assume if this variable is set we are running under cargo.
                 if std::env::var("OUT_DIR").is_ok() && self.show_warnings {
                     for line in ws_loc.lines().chain(ws.lines()) {
@@ -805,16 +768,21 @@ where
                 }
             }
         }
-        let grm = match YaccGrammar::<StorageT>::new_from_ast_with_validity_info(&ast_validation) {
+        let grm = match YaccGrammar::<StorageT>::new_from_ast_with_validity_info(
+            build_env.ast_with_validity_info(),
+        ) {
             Ok(grm) => grm,
             Err(errs) => {
                 let mut out = String::new();
                 out.push_str(&format!(
                     "\n{ERROR}{}\n",
-                    yacc_diag.file_location_msg("", None)
+                    src_env.yacc_diag().file_location_msg("", None)
                 ));
                 for e in errs {
-                    out.push_str(&indent("     ", &yacc_diag.format_error(e).to_string()));
+                    out.push_str(&indent(
+                        "     ",
+                        &src_env.yacc_diag().format_error(e).to_string(),
+                    ));
                     out.push('\n');
                 }
                 return Err(ErrorString(out).into());
@@ -822,7 +790,7 @@ where
         };
         #[cfg(test)]
         if let Some(cb) = &self.inspect_callback {
-            cb(self.recoverer.expect("has a default value"))?;
+            cb(build_env.recoverer())?;
         }
 
         let rule_ids = grm
@@ -831,26 +799,7 @@ where
             .map(|(&n, &i)| (n.to_owned(), i.as_storaget()))
             .collect::<HashMap<_, _>>();
 
-        let derived_mod_name = match self.mod_name {
-            Some(s) => s.to_owned(),
-            None => {
-                // The user hasn't specified a module name, so we create one automatically: what we
-                // do is strip off all the filename extensions (note that it's likely that inp ends
-                // with `y.rs`, so we potentially have to strip off more than one extension) and
-                // then add `_y` to the end.
-                let mut stem = grmp.to_str().unwrap();
-                loop {
-                    let new_stem = Path::new(stem).file_stem().unwrap().to_str().unwrap();
-                    if stem == new_stem {
-                        break;
-                    }
-                    stem = new_stem;
-                }
-                format!("{}_y", stem)
-            }
-        };
-
-        let cache = self.rebuild_cache(&derived_mod_name, &grm);
+        let cache = self.rebuild_cache(build_env.derived_mod_name(), &grm);
 
         // We don't need to go through the full rigmarole of generating an output file if all of
         // the following are true: the output file exists; it is newer than the input file; and the
@@ -903,9 +852,9 @@ where
                 (None, Some(j)) if 0 == c.sr_len() && j == c.rr_len() => (),
                 (None, None) if 0 == c.rr_len() && 0 == c.sr_len() => (),
                 _ => {
-                    let conflicts_diagnostic = yacc_diag.format_conflicts::<LexerTypesT>(
+                    let conflicts_diagnostic = src_env.yacc_diag().format_conflicts::<LexerTypesT>(
                         &grm,
-                        ast_validation.ast(),
+                        build_env.ast_with_validity_info().ast(),
                         c,
                         &sgraph,
                         &stable,
@@ -928,32 +877,19 @@ where
             } else {
                 rt
             };
-            inspector_rt(&mut header, rt, &rule_ids, grmp)?
+            inspector_rt(src_env.header_mut(), rt, &rule_ids, grmp)?
         }
 
-        let unused_keys = header.unused();
-        if !unused_keys.is_empty() {
-            return Err(format!("Unused keys in header: {}", unused_keys.join(", ")).into());
-        }
-        let missing_keys = header
-            .missing()
-            .iter()
-            .map(|s| s.as_str())
-            .collect::<Vec<_>>();
-        if !missing_keys.is_empty() {
-            return Err(format!(
-                "Required values were missing from the header: {}",
-                missing_keys.join(", ")
-            )
-            .into());
-        }
+        src_env.check_unused_header_keys()?;
 
         self.output_file(
             &grm,
             &stable,
-            &derived_mod_name,
+            build_env.derived_mod_name(),
             outp,
             &format!("/* CACHE INFORMATION {} */\n", cache),
+            src_env.yacc_diag(),
+            &build_env,
         )?;
         let conflicts = if stable.conflicts().is_some() {
             Some((sgraph, stable))
@@ -1082,6 +1018,8 @@ where
         mod_name: &str,
         outp_rs: P,
         cache: &str,
+        _diag: &SpannedDiagnosticFormatter,
+        build_env: &ParserBuildEnv<'_, LexerTypesT>,
     ) -> Result<(), Box<dyn Error>> {
         let visibility = self.visibility.clone();
         let user_actions = if let Some(
@@ -1094,7 +1032,7 @@ where
         };
         let rule_consts = self.gen_rule_consts(grm)?;
         let token_epp = self.gen_token_epp(grm)?;
-        let parse_function = self.gen_parse_function(grm, stable)?;
+        let parse_function = self.gen_parse_function(grm, stable, build_env)?;
         let action_wrappers = match self.yacckind.unwrap() {
             YaccKind::Original(YaccOriginalActionKind::UserAction) | YaccKind::Grmtools => {
                 Some(self.gen_wrappers(grm)?)
@@ -1232,11 +1170,12 @@ where
         &self,
         grm: &YaccGrammar<StorageT>,
         stable: &StateTable<StorageT>,
+        build_env: &ParserBuildEnv<'_, LexerTypesT>,
     ) -> Result<TokenStream, Box<dyn Error>> {
         let storaget = str::parse::<TokenStream>(type_name::<StorageT>())?;
         let lexertypest = str::parse::<TokenStream>(type_name::<LexerTypesT>())?;
-        let recoverer = self.recoverer;
-        let run_parser = match self.yacckind.unwrap() {
+        let recoverer = build_env.recoverer();
+        let run_parser = match build_env.yacc_kind() {
             YaccKind::Original(YaccOriginalActionKind::GenericParseTree) => {
                 quote! {
                     ::lrpar::RTParserBuilder::new(grm, stable)
@@ -1303,7 +1242,7 @@ where
             kind => panic!("YaccKind {:?} not supported", kind),
         };
 
-        let parsed_parse_generics: Generics = match self.yacckind.unwrap() {
+        let parsed_parse_generics: Generics = match build_env.yacc_kind() {
             YaccKind::Original(YaccOriginalActionKind::UserAction) | YaccKind::Grmtools => {
                 make_generics(grm.parse_generics().as_deref())?
             }
@@ -1312,7 +1251,7 @@ where
         let (generics, _, where_clause) = parsed_parse_generics.split_for_impl();
 
         // `parse()` may or may not have an argument for `%parseparam`.
-        let parse_fn_parse_param = match self.yacckind.unwrap() {
+        let parse_fn_parse_param = match build_env.yacc_kind() {
             YaccKind::Original(YaccOriginalActionKind::UserAction) | YaccKind::Grmtools => {
                 if let Some((name, tyname)) = grm.parse_param() {
                     let name = str::parse::<TokenStream>(name)?;
@@ -1324,7 +1263,7 @@ where
             }
             _ => None,
         };
-        let parse_fn_return_ty = match self.yacckind.unwrap() {
+        let parse_fn_return_ty = match build_env.yacc_kind() {
             YaccKind::Original(YaccOriginalActionKind::UserAction) | YaccKind::Grmtools => {
                 let actiont = grm
                     .actiontype(self.user_start_ridx(grm))
@@ -1345,9 +1284,7 @@ where
             _ => unreachable!(),
         };
 
-        let serialisation_format = self
-            .serialisation_format
-            .expect("Should already have a default value");
+        let serialisation_format = build_env.serialisation_format();
         // Note that the configuration types use associated consts, and thus these configurations represent distinct types.
         let (grm_data, stable_data): (Vec<u8>, Vec<u8>) = match serialisation_format {
             SerialisationFormat::FixedSizeInteger => {
@@ -1866,7 +1803,7 @@ where
 ///
 /// It is plausible that we should a step 4, but currently do not:
 /// 4. Replace all `\n{indent}\n` with `\n\n`
-fn indent(indent: &str, s: &str) -> String {
+pub(crate) fn indent(indent: &str, s: &str) -> String {
     format!("{indent}{}\n", s.trim_end_matches('\n')).replace('\n', &format!("\n{}", indent))
 }
 
