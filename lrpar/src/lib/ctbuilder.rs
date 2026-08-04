@@ -777,40 +777,36 @@ where
 
         self.yacckind = Some(ast_validation.yacc_kind());
         let warnings = ast_validation.ast().warnings();
-        let res = YaccGrammar::<StorageT>::new_from_ast_with_validity_info(&ast_validation);
-        let grm = match res {
-            Ok(_) if self.warnings_are_errors && !warnings.is_empty() => {
-                let mut out = String::new();
+        if self.warnings_are_errors && !warnings.is_empty() {
+            let mut out = String::new();
+            out.push_str(&format!(
+                "\n{ERROR}{}\n",
+                yacc_diag.file_location_msg("", None)
+            ));
+            for e in warnings {
                 out.push_str(&format!(
-                    "\n{ERROR}{}\n",
-                    yacc_diag.file_location_msg("", None)
+                    "{}\n",
+                    indent("     ", &yacc_diag.format_warning(e).to_string())
                 ));
-                for e in warnings {
-                    out.push_str(&format!(
-                        "{}\n",
-                        indent("     ", &yacc_diag.format_warning(e).to_string())
-                    ));
-                }
-                return Err(ErrorString(out))?;
             }
-            Ok(grm) => {
-                if !warnings.is_empty() {
-                    for w in warnings {
-                        let ws_loc = yacc_diag.file_location_msg("", None);
-                        let ws = indent("     ", &yacc_diag.format_warning(w).to_string());
-                        // Assume if this variable is set we are running under cargo.
-                        if std::env::var("OUT_DIR").is_ok() && self.show_warnings {
-                            for line in ws_loc.lines().chain(ws.lines()) {
-                                println!("cargo:warning={}", line);
-                            }
-                        } else if self.show_warnings {
-                            eprintln!("{}", ws_loc);
-                            eprintln!("{WARNING} {}", ws);
-                        }
+            return Err(ErrorString(out).into());
+        } else if !warnings.is_empty() {
+            for w in warnings {
+                let ws_loc = yacc_diag.file_location_msg("", None);
+                let ws = indent("     ", &yacc_diag.format_warning(w).to_string());
+                // Assume if this variable is set we are running under cargo.
+                if std::env::var("OUT_DIR").is_ok() && self.show_warnings {
+                    for line in ws_loc.lines().chain(ws.lines()) {
+                        println!("cargo:warning={}", line);
                     }
+                } else if self.show_warnings {
+                    eprintln!("{}", ws_loc);
+                    eprintln!("{WARNING} {}", ws);
                 }
-                grm
             }
+        }
+        let grm = match YaccGrammar::<StorageT>::new_from_ast_with_validity_info(&ast_validation) {
+            Ok(grm) => grm,
             Err(errs) => {
                 let mut out = String::new();
                 out.push_str(&format!(
@@ -821,11 +817,9 @@ where
                     out.push_str(&indent("     ", &yacc_diag.format_error(e).to_string()));
                     out.push('\n');
                 }
-
-                return Err(ErrorString(out))?;
+                return Err(ErrorString(out).into());
             }
         };
-
         #[cfg(test)]
         if let Some(cb) = &self.inspect_callback {
             cb(self.recoverer.expect("has a default value"))?;
