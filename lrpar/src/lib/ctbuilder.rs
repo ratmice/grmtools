@@ -1800,7 +1800,7 @@ where
 ///
 /// It is plausible that we should a step 4, but currently do not:
 /// 4. Replace all `\n{indent}\n` with `\n\n`
-fn indent(indent: &str, s: &str) -> String {
+pub(crate) fn indent(indent: &str, s: &str) -> String {
     format!("{indent}{}\n", s.trim_end_matches('\n')).replace('\n', &format!("\n{}", indent))
 }
 

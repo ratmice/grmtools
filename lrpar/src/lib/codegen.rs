@@ -11,7 +11,7 @@ use cfgrammar::{
 
 use crate::{
     LexerTypes, RecoveryKind, RustEdition, SerialisationFormat, Visibility,
-    ctbuilder::{CTConflictsError, ERROR, FixIntConfig, VarIntConfig},
+    ctbuilder::{CTConflictsError, ERROR, FixIntConfig, VarIntConfig, indent},
     diagnostics::{DiagnosticFormatter, SpannedDiagnosticFormatter},
 };
 
@@ -390,20 +390,6 @@ where
     ) {
         (self.grm, self.sgraph, self.stable)
     }
-}
-
-/// Indents a multi-line string and trims any trailing newline.
-/// This currently assumes that indentation on blank lines does not matter.
-///
-/// The algorithm used by this function is:
-/// 1. Prefix `s` with the indentation, indenting the first line.
-/// 2. Trim any trailing newlines.
-/// 3. Replace all newlines with `\n{indent}`` to indent all lines after the first.
-///
-/// It is plausible that we should a step 4, but currently do not:
-/// 4. Replace all `\n{indent}\n` with `\n\n`
-fn indent(indent: &str, s: &str) -> String {
-    format!("{indent}{}\n", s.trim_end_matches('\n')).replace('\n', &format!("\n{}", indent))
 }
 
 /// A string which uses `Display` for it's `Debug` impl.
