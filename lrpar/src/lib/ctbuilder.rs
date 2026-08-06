@@ -751,13 +751,11 @@ where
         src_env.check_unused_header_keys()?;
 
         self.output_file(
-            grm,
-            build_env.mod_name(),
             outp,
             &format!("/* CACHE INFORMATION {} */\n", cache_str),
+            &src_env,
             &build_env,
             &code_gen,
-            &src_env,
         )?;
         let (grm, sgraph, stable) = code_gen.take_parser();
         let conflicts = if stable.conflicts().is_some() {
@@ -882,16 +880,17 @@ where
 
     fn output_file<P: AsRef<Path>>(
         &self,
-        grm: &YaccGrammar<StorageT>,
-        mod_name: &str,
         outp_rs: P,
         cache: &str,
+        src_env: &ParserSrcEnv,
         build_env: &ParserBuildEnv<'_, LexerTypesT>,
         code_gen: &ParserCodegen<LexerTypesT>,
-        src_env: &ParserSrcEnv,
     ) -> Result<(), Box<dyn Error>> {
+        let grm = code_gen.grm();
+        let mod_name = build_env.mod_name();
         let visibility = self.visibility.clone();
-        let user_actions = if let YaccKind::Original(YaccOriginalActionKind::UserAction) | YaccKind::Grmtools = build_env.ast_validation().yacc_kind()
+        let user_actions = if let YaccKind::Original(YaccOriginalActionKind::UserAction)
+        | YaccKind::Grmtools = build_env.ast_validation().yacc_kind()
         {
             Some(code_gen.gen_user_actions(src_env)?)
         } else {
