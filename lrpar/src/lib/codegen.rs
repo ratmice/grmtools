@@ -1217,6 +1217,19 @@ impl Visibility {
     }
 }
 
+impl ToTokens for SerialisationFormat {
+    fn to_tokens(&self, tokens: &mut TokenStream) {
+        tokens.extend(match self {
+            SerialisationFormat::FixedSizeInteger => {
+                quote! {::lrpar::ctbuilder::SerialisationFormat::FixedSizeInteger}
+            }
+            SerialisationFormat::VariableSizedInteger => {
+                quote! {::lrpar::ctbuilder::SerialisationFormat::VariableSizedInteger}
+            }
+        })
+    }
+}
+
 fn make_generics(parse_generics: Option<&str>) -> Result<Generics, Box<dyn Error>> {
     if let Some(parse_generics) = parse_generics {
         let tokens = str::parse::<TokenStream>(parse_generics)?;

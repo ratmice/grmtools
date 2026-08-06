@@ -31,8 +31,6 @@ use cfgrammar::{
 use filetime::FileTime;
 use lrtable::{StateGraph, StateTable, statetable::Conflicts};
 use num_traits::{AsPrimitive, PrimInt, Unsigned};
-use proc_macro2::TokenStream;
-use quote::{ToTokens, quote};
 use wincode::{SchemaRead, SchemaReadOwned, SchemaWrite};
 
 const RUST_FILE_EXT: &str = "rs";
@@ -213,18 +211,6 @@ impl<T: Clone + Debug> TryFrom<&Value<T>> for SerialisationFormat {
 // We export this for generated code to refer to.
 #[doc(hidden)]
 pub use wincode;
-impl ToTokens for SerialisationFormat {
-    fn to_tokens(&self, tokens: &mut TokenStream) {
-        tokens.extend(match self {
-            SerialisationFormat::FixedSizeInteger => {
-                quote! {::lrpar::ctbuilder::SerialisationFormat::FixedSizeInteger}
-            }
-            SerialisationFormat::VariableSizedInteger => {
-                quote! {::lrpar::ctbuilder::SerialisationFormat::VariableSizedInteger}
-            }
-        })
-    }
-}
 
 /// A `CTParserBuilder` allows one to specify the criteria for building a statically generated
 /// parser.
