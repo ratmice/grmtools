@@ -183,7 +183,7 @@ impl<'a> ParserSrcEnv<'a> {
         }
     }
 
-    pub(crate) fn extract_ast_validation(
+    fn extract_ast_validation(
         &mut self,
         from_ast: Option<&ASTWithValidityInfo>,
     ) -> Result<ASTWithValidityInfo, Box<dyn Error>> {
@@ -203,7 +203,7 @@ impl<'a> ParserSrcEnv<'a> {
         }
     }
 
-    pub(crate) fn extract_recoverer(&mut self) -> Result<RecoveryKind, Box<dyn Error>> {
+    fn extract_recoverer(&mut self) -> Result<RecoveryKind, Box<dyn Error>> {
         self.header.mark_used(&"recoverer".to_string());
         let rk_val = self
             .header
@@ -217,7 +217,7 @@ impl<'a> ParserSrcEnv<'a> {
         }
     }
 
-    pub(crate) fn extract_serialisation_format(
+    fn extract_serialisation_format(
         &mut self,
     ) -> Result<SerialisationFormat, Box<dyn Error>> {
         self.header.mark_used(&"serialisation_format".to_string());
@@ -232,7 +232,7 @@ impl<'a> ParserSrcEnv<'a> {
         }
     }
 
-    pub(crate) fn extract_mod_name(&self, args: &ParserBuildEnvArgs) -> String {
+    fn extract_mod_name(&self, args: &ParserBuildEnvArgs) -> String {
         match &args.mod_name {
             Some(s) => s.to_owned(),
             None => {
