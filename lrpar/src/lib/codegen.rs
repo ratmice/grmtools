@@ -10,26 +10,27 @@ use std::{
     path::Path,
 };
 
+use crate::{
+    LexerTypes, RecoveryKind, RustEdition, SerialisationFormat, Visibility,
+    ctbuilder::{CTConflictsError, ERROR, FixIntConfig, VarIntConfig, indent},
+    diagnostics::{DiagnosticFormatter, SpannedDiagnosticFormatter},
+};
 use cfgrammar::{
     Location, RIdx, Span, Symbol,
     header::{GrmtoolsSectionParser, Header, HeaderValue},
     yacc::{YaccGrammar, YaccKind, YaccOriginalActionKind, ast::ASTWithValidityInfo},
 };
 use proc_macro2::{Literal, TokenStream};
-use syn::Generics;
-
-use crate::{
-    LexerTypes, RecoveryKind, RustEdition, SerialisationFormat, Visibility,
-    ctbuilder::{
-        ACTION_PREFIX, ACTIONS_KIND, ACTIONS_KIND_HIDDEN, ACTIONS_KIND_PREFIX, CTConflictsError,
-        ERROR, FixIntConfig, VarIntConfig, indent, make_generics,
-    },
-    diagnostics::{DiagnosticFormatter, SpannedDiagnosticFormatter},
-};
+use syn::{Generics, parse_quote};
 
 use lrtable::{Minimiser, StateGraph, StateTable, from_yacc};
 use quote::{ToTokens, TokenStreamExt, format_ident, quote};
 use wincode::SchemaWrite;
+
+const ACTION_PREFIX: &str = "__gt_";
+const ACTIONS_KIND: &str = "__GtActionsKind";
+const ACTIONS_KIND_PREFIX: &str = "Ak";
+const ACTIONS_KIND_HIDDEN: &str = "__GtActionsKindHidden";
 
 const GLOBAL_PREFIX: &str = "__GT_";
 
@@ -418,6 +419,84 @@ where
         self.gen_cache(src_env, build_env).to_string()
     }
 
+    pub(crate) fn generate(
+        &self,
+        src_env: &ParserSrcEnv,
+        build_env: &ParserBuildEnv<LexerTypesT>,
+    ) -> Result<String, Box<dyn Error>> {
+        let grm = self.grm();
+        let mod_name = build_env.mod_name();
+        let visibility = build_env.visibility();
+        let user_actions = if let YaccKind::Original(YaccOriginalActionKind::UserAction)
+        | YaccKind::Grmtools = build_env.ast_validation().yacc_kind()
+        {
+            Some(self.gen_user_actions(src_env)?)
+        } else {
+            None
+        };
+        let rule_consts = self.gen_rule_consts(grm)?;
+        let token_epp = self.gen_token_epp(grm)?;
+        let parse_function = self.gen_parse_function(build_env)?;
+        let action_wrappers = match build_env.ast_validation().yacc_kind() {
+            YaccKind::Original(YaccOriginalActionKind::UserAction) | YaccKind::Grmtools => {
+                Some(self.gen_wrappers(build_env)?)
+            }
+            YaccKind::Original(YaccOriginalActionKind::NoAction)
+            | YaccKind::Original(YaccOriginalActionKind::GenericParseTree) => None,
+            _ => unreachable!(),
+        };
+
+        let additional_decls = if let YaccKind::Original(YaccOriginalActionKind::GenericParseTree) =
+            build_env.ast_validation().yacc_kind()
+        {
+            // `lrpar::Node`` is deprecated within the lrpar crate, but not from within this module,
+            // Once it is removed from `lrpar`, we should move the declaration here entirely.
+            Some(quote! {
+                        #[allow(unused_imports)]
+                        pub use ::lrpar::parser::_deprecated_moved_::Node;
+            })
+        } else {
+            None
+        };
+
+        let mod_name =
+            match syn::parse_str::<proc_macro2::Ident>(mod_name) {
+                Ok(s) => s,
+                Err(e) => return Err(format!(
+                    "CTParserBuilder::mod_name(\"{}\") is not a valid rust identifier due to '{}'",
+                    mod_name, e
+                )
+                .into()),
+            };
+        let out_tokens = quote! {
+            #visibility mod #mod_name {
+                // At the top so that `user_actions` may contain #![inner_attribute]
+                #user_actions
+                mod _parser_ {
+                    #![allow(clippy::type_complexity)]
+                    #![allow(clippy::unnecessary_wraps)]
+                    #![deny(unsafe_code)]
+                    #[allow(unused_imports)]
+                    use super::*;
+                    #additional_decls
+                    #parse_function
+                    #rule_consts
+                    #token_epp
+                    #action_wrappers
+                } // End of `mod _parser_`
+                #[allow(unused_imports)]
+                pub use _parser_::*;
+                #[allow(unused_imports)]
+                use ::lrpar::Lexeme;
+            } // End of `mod #mod_name`
+        };
+        // Try and run a code formatter on the generated code.
+        let unformatted = out_tokens.to_string();
+        Ok(syn::parse_str(&unformatted)
+            .map(|syntax_tree| prettyplease::unparse(&syntax_tree))
+            .unwrap_or(unformatted))
+    }
+
     /// Generate the cache, which determines if anything's changed enough that we need to
     /// regenerate outputs and force rustc to recompile.
     fn gen_cache(
@@ -467,10 +546,7 @@ where
     }
 
     /// Generate the user action functions (if any).
-    pub(crate) fn gen_user_actions(
-        &self,
-        src_env: &ParserSrcEnv,
-    ) -> Result<TokenStream, Box<dyn Error>> {
+    fn gen_user_actions(&self, src_env: &ParserSrcEnv) -> Result<TokenStream, Box<dyn Error>> {
         let grm = self.grm();
         let diag = src_env.yacc_diag();
         let programs = grm
@@ -636,7 +712,7 @@ where
         })
     }
 
-    pub(crate) fn gen_rule_consts(
+    fn gen_rule_consts(
         &self,
         grm: &YaccGrammar<LexerTypesT::StorageT>,
     ) -> Result<TokenStream, proc_macro2::LexError> {
@@ -655,7 +731,7 @@ where
         Ok(toks)
     }
 
-    pub(crate) fn gen_token_epp(
+    fn gen_token_epp(
         &self,
         grm: &YaccGrammar<LexerTypesT::StorageT>,
     ) -> Result<TokenStream, proc_macro2::LexError> {
@@ -680,7 +756,7 @@ where
     }
 
     /// Generate the main parse() function for the output file.
-    pub(crate) fn gen_parse_function(
+    fn gen_parse_function(
         &self,
         build_env: &ParserBuildEnv<LexerTypesT>,
     ) -> Result<TokenStream, Box<dyn Error>> {
@@ -859,7 +935,7 @@ where
     }
 
     /// Generate the wrappers that call user actions
-    pub(crate) fn gen_wrappers(
+    fn gen_wrappers(
         &self,
         build_env: &ParserBuildEnv<LexerTypesT>,
     ) -> Result<TokenStream, Box<dyn Error>> {
@@ -1138,5 +1214,17 @@ impl Visibility {
                 quote!(::lrpar::Visibility::PublicIn(#data))
             }
         }
+    }
+}
+
+fn make_generics(parse_generics: Option<&str>) -> Result<Generics, Box<dyn Error>> {
+    if let Some(parse_generics) = parse_generics {
+        let tokens = str::parse::<TokenStream>(parse_generics)?;
+        match syn::parse2(quote!(<'lexer, 'input: 'lexer, #tokens>)) {
+            Ok(res) => Ok(res),
+            Err(err) => Err(format!("unable to parse %parse-generics: {}", err).into()),
+        }
+    } else {
+        Ok(parse_quote!(<'lexer, 'input: 'lexer>))
     }
 }

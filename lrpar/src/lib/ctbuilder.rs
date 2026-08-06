@@ -26,20 +26,14 @@ use cfgrammar::{
     Location,
     header::{Header, HeaderError, HeaderErrorKind, HeaderValue, Namespaced, Setting, Value},
     markmap::{Entry, MergeBehavior},
-    yacc::{YaccGrammar, YaccKind, YaccOriginalActionKind, ast::ASTWithValidityInfo},
+    yacc::{YaccGrammar, YaccKind, ast::ASTWithValidityInfo},
 };
 use filetime::FileTime;
 use lrtable::{StateGraph, StateTable, statetable::Conflicts};
 use num_traits::{AsPrimitive, PrimInt, Unsigned};
 use proc_macro2::TokenStream;
 use quote::{ToTokens, quote};
-use syn::{Generics, parse_quote};
 use wincode::{SchemaRead, SchemaReadOwned, SchemaWrite};
-
-pub(crate) const ACTION_PREFIX: &str = "__gt_";
-pub(crate) const ACTIONS_KIND: &str = "__GtActionsKind";
-pub(crate) const ACTIONS_KIND_PREFIX: &str = "Ak";
-pub(crate) const ACTIONS_KIND_HIDDEN: &str = "__GtActionsKindHidden";
 
 const RUST_FILE_EXT: &str = "rs";
 
@@ -885,77 +879,7 @@ where
         build_env: &ParserBuildEnv<'_, LexerTypesT>,
         code_gen: &ParserCodegen<LexerTypesT>,
     ) -> Result<(), Box<dyn Error>> {
-        let grm = code_gen.grm();
-        let mod_name = build_env.mod_name();
-        let visibility = build_env.visibility();
-        let user_actions = if let YaccKind::Original(YaccOriginalActionKind::UserAction)
-        | YaccKind::Grmtools = build_env.ast_validation().yacc_kind()
-        {
-            Some(code_gen.gen_user_actions(src_env)?)
-        } else {
-            None
-        };
-        let rule_consts = code_gen.gen_rule_consts(grm)?;
-        let token_epp = code_gen.gen_token_epp(grm)?;
-        let parse_function = code_gen.gen_parse_function(build_env)?;
-        let action_wrappers = match build_env.ast_validation().yacc_kind() {
-            YaccKind::Original(YaccOriginalActionKind::UserAction) | YaccKind::Grmtools => {
-                Some(code_gen.gen_wrappers(build_env)?)
-            }
-            YaccKind::Original(YaccOriginalActionKind::NoAction)
-            | YaccKind::Original(YaccOriginalActionKind::GenericParseTree) => None,
-            _ => unreachable!(),
-        };
-
-        let additional_decls = if let YaccKind::Original(YaccOriginalActionKind::GenericParseTree) =
-            build_env.ast_validation().yacc_kind()
-        {
-            // `lrpar::Node`` is deprecated within the lrpar crate, but not from within this module,
-            // Once it is removed from `lrpar`, we should move the declaration here entirely.
-            Some(quote! {
-                        #[allow(unused_imports)]
-                        pub use ::lrpar::parser::_deprecated_moved_::Node;
-            })
-        } else {
-            None
-        };
-
-        let mod_name =
-            match syn::parse_str::<proc_macro2::Ident>(mod_name) {
-                Ok(s) => s,
-                Err(e) => return Err(format!(
-                    "CTParserBuilder::mod_name(\"{}\") is not a valid rust identifier due to '{}'",
-                    mod_name, e
-                )
-                .into()),
-            };
-        let out_tokens = quote! {
-            #visibility mod #mod_name {
-                // At the top so that `user_actions` may contain #![inner_attribute]
-                #user_actions
-                mod _parser_ {
-                    #![allow(clippy::type_complexity)]
-                    #![allow(clippy::unnecessary_wraps)]
-                    #![deny(unsafe_code)]
-                    #[allow(unused_imports)]
-                    use super::*;
-                    #additional_decls
-                    #parse_function
-                    #rule_consts
-                    #token_epp
-                    #action_wrappers
-                } // End of `mod _parser_`
-                #[allow(unused_imports)]
-                pub use _parser_::*;
-                #[allow(unused_imports)]
-                use ::lrpar::Lexeme;
-            } // End of `mod #mod_name`
-        };
-        // Try and run a code formatter on the generated code.
-        let unformatted = out_tokens.to_string();
-        let outs = syn::parse_str(&unformatted)
-            .map(|syntax_tree| prettyplease::unparse(&syntax_tree))
-            .unwrap_or(unformatted);
+        let outs = code_gen.generate(src_env, build_env)?;
         let mut f = File::create(outp_rs)?;
         f.write_all(outs.as_bytes())?;
         f.write_all(cache.as_bytes())?;
@@ -1078,18 +1002,6 @@ where
 /// 4. Replace all `\n{indent}\n` with `\n\n`
 pub(crate) fn indent(indent: &str, s: &str) -> String {
     format!("{indent}{}\n", s.trim_end_matches('\n')).replace('\n', &format!("\n{}", indent))
-}
-
-pub(crate) fn make_generics(parse_generics: Option<&str>) -> Result<Generics, Box<dyn Error>> {
-    if let Some(parse_generics) = parse_generics {
-        let tokens = str::parse::<TokenStream>(parse_generics)?;
-        match syn::parse2(quote!(<'lexer, 'input: 'lexer, #tokens>)) {
-            Ok(res) => Ok(res),
-            Err(err) => Err(format!("unable to parse %parse-generics: {}", err).into()),
-        }
-    } else {
-        Ok(parse_quote!(<'lexer, 'input: 'lexer>))
-    }
 }
 
 // Tests dealing with the filesystem not supported under wasm32
