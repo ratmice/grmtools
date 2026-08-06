@@ -1,7 +1,7 @@
 #![deny(unfulfilled_lint_expectations)]
 #![expect(dead_code)]
 
-use std::{error::Error, fmt, marker::PhantomData, path::Path};
+use std::{error::Error, fmt, hash::Hash, marker::PhantomData, path::Path};
 
 use cfgrammar::{
     Location, Span,
@@ -11,11 +11,12 @@ use cfgrammar::{
 
 use crate::{
     LexerTypes, RecoveryKind, RustEdition, SerialisationFormat, Visibility,
-    ctbuilder::ERROR,
+    ctbuilder::{CTConflictsError, ERROR, FixIntConfig, VarIntConfig},
     diagnostics::{DiagnosticFormatter, SpannedDiagnosticFormatter},
 };
 
-use lrtable::{StateGraph, StateTable};
+use lrtable::{Minimiser, StateGraph, StateTable, from_yacc};
+use wincode::SchemaWrite;
 
 pub(crate) struct ParserSrcEnv<'a> {
     src: &'a str,
@@ -217,9 +218,7 @@ impl<'a> ParserSrcEnv<'a> {
         }
     }
 
-    fn extract_serialisation_format(
-        &mut self,
-    ) -> Result<SerialisationFormat, Box<dyn Error>> {
+    fn extract_serialisation_format(&mut self) -> Result<SerialisationFormat, Box<dyn Error>> {
         self.header.mark_used(&"serialisation_format".to_string());
         if let Some(ec_val) = self
             .header
@@ -289,6 +288,103 @@ where
 
     pub(crate) fn serialisation_format(&self) -> &SerialisationFormat {
         &self.serialisation_format
+    }
+
+    pub(crate) fn code_generator(
+        &self,
+        src_env: &ParserSrcEnv,
+        timestamp: &str,
+    ) -> Result<ParserCodegen<LexerTypesT>, Box<dyn Error>> {
+        let grm = match YaccGrammar::<LexerTypesT::StorageT>::new_from_ast_with_validity_info(
+            &self.ast_validation,
+        ) {
+            Ok(grm) => grm,
+            Err(errs) => {
+                let mut out = String::new();
+                out.push_str(&format!(
+                    "\n{ERROR}{}\n",
+                    src_env.yacc_diag().file_location_msg("", None)
+                ));
+                for e in errs {
+                    out.push_str(&indent(
+                        "     ",
+                        &src_env.yacc_diag().format_error(e).to_string(),
+                    ));
+                    out.push('\n');
+                }
+                return Err(ErrorString(out).into());
+            }
+        };
+
+        let (sgraph, stable) = from_yacc(&grm, Minimiser::Pager)?;
+        if self.cache_args.error_on_conflicts
+            && let Some(c) = stable.conflicts()
+        {
+            match (grm.expect(), grm.expectrr()) {
+                (Some(i), Some(j)) if i == c.sr_len() && j == c.rr_len() => (),
+                (Some(i), None) if i == c.sr_len() && 0 == c.rr_len() => (),
+                (None, Some(j)) if 0 == c.sr_len() && j == c.rr_len() => (),
+                (None, None) if 0 == c.rr_len() && 0 == c.sr_len() => (),
+                _ => {
+                    let conflicts_diagnostic = src_env.yacc_diag().format_conflicts::<LexerTypesT>(
+                        &grm,
+                        self.ast_validation.ast(),
+                        c,
+                        &sgraph,
+                        &stable,
+                    );
+                    return Err(Box::new(CTConflictsError {
+                        conflicts_diagnostic,
+                        phantom: PhantomData,
+                        #[cfg(test)]
+                        stable,
+                    }));
+                }
+            }
+        }
+
+        Ok(ParserCodegen {
+            grm,
+            stable,
+            sgraph,
+            timestamp: timestamp.to_string(),
+        })
+    }
+}
+
+impl<LexerTypesT> ParserCodegen<LexerTypesT>
+where
+    LexerTypesT: LexerTypes,
+    usize: num_traits::AsPrimitive<LexerTypesT::StorageT>,
+    LexerTypesT::StorageT: 'static
+        + fmt::Debug
+        + Hash
+        + num_traits::PrimInt
+        + SchemaWrite<FixIntConfig, Src = LexerTypesT::StorageT>
+        + SchemaWrite<VarIntConfig, Src = LexerTypesT::StorageT>
+        + num_traits::Unsigned,
+    LexerTypesT: LexerTypes,
+{
+    pub(crate) fn grm(&self) -> &YaccGrammar<LexerTypesT::StorageT> {
+        &self.grm
+    }
+
+    pub(crate) fn stable(&self) -> &StateTable<LexerTypesT::StorageT> {
+        &self.stable
+    }
+
+    pub(crate) fn sgraph(&self) -> &StateGraph<LexerTypesT::StorageT> {
+        &self.sgraph
+    }
+
+    pub(crate) fn take_parser(
+        self,
+    ) -> (
+        YaccGrammar<LexerTypesT::StorageT>,
+        StateGraph<LexerTypesT::StorageT>,
+        StateTable<LexerTypesT::StorageT>,
+    ) {
+        (self.grm, self.sgraph, self.stable)
     }
 }
 

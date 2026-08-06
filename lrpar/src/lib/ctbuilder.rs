@@ -30,7 +30,7 @@ use cfgrammar::{
     yacc::{YaccGrammar, YaccKind, YaccOriginalActionKind, ast::ASTWithValidityInfo},
 };
 use filetime::FileTime;
-use lrtable::{Minimiser, StateGraph, StateTable, from_yacc, statetable::Conflicts};
+use lrtable::{StateGraph, StateTable, statetable::Conflicts};
 use num_traits::{AsPrimitive, PrimInt, Unsigned};
 use proc_macro2::{Literal, TokenStream};
 use quote::{ToTokens, TokenStreamExt, format_ident, quote};
@@ -51,12 +51,12 @@ pub(crate) const ERROR: &str = "[Error]";
 static GENERATED_PATHS: LazyLock<Mutex<HashSet<PathBuf>>> =
     LazyLock::new(|| Mutex::new(HashSet::new()));
 
-struct CTConflictsError<StorageT: Eq + Hash> {
-    conflicts_diagnostic: String,
+pub(crate) struct CTConflictsError<StorageT: Eq + Hash> {
+    pub(crate) conflicts_diagnostic: String,
     #[cfg(test)]
     #[cfg_attr(test, allow(dead_code))]
-    stable: StateTable<StorageT>,
-    phantom: PhantomData<StorageT>,
+    pub(crate) stable: StateTable<StorageT>,
+    pub(crate) phantom: PhantomData<StorageT>,
 }
 
 /// The quote impl of `ToTokens` for `Option` prints an empty string for `None`
@@ -367,9 +367,9 @@ where
 }
 
 /// Defaults to `wincode::int_encoding::VarInt`.
-type FixIntConfig = wincode::config::Configuration;
+pub(crate) type FixIntConfig = wincode::config::Configuration;
 /// The default config with the last parameter set to `VarInt`
-type VarIntConfig = wincode::config::Configuration<
+pub(crate) type VarIntConfig = wincode::config::Configuration<
     true,
     4194304,
     wincode::len::BincodeLen,
@@ -768,30 +768,16 @@ where
                 }
             }
         }
-        let grm = match YaccGrammar::<StorageT>::new_from_ast_with_validity_info(
-            build_env.ast_validation(),
-        ) {
-            Ok(grm) => grm,
-            Err(errs) => {
-                let mut out = String::new();
-                out.push_str(&format!(
-                    "\n{ERROR}{}\n",
-                    src_env.yacc_diag().file_location_msg("", None)
-                ));
-                for e in errs {
-                    out.push_str(&indent(
-                        "     ",
-                        &src_env.yacc_diag().format_error(e).to_string(),
-                    ));
-                    out.push('\n');
-                }
-                return Err(ErrorString(out).into());
-            }
-        };
+
         #[cfg(test)]
         if let Some(cb) = &self.inspect_callback {
-            cb(self.recoverer.expect("has a default value"))?;
+            cb(build_env.recoverer)?;
         }
+
+        let timestamp = env!("VERGEN_BUILD_TIMESTAMP");
+        let code_gen = build_env.code_generator(&src_env, timestamp)?;
+        let grm = code_gen.grm();
+        let stable = code_gen.stable();
 
         let rule_ids = grm
             .tokens_map()
@@ -818,7 +804,7 @@ where
             }
         };
 
-        let cache = self.rebuild_cache(&derived_mod_name, &grm);
+        let cache = self.rebuild_cache(&derived_mod_name, grm);
 
         // We don't need to go through the full rigmarole of generating an output file if all of
         // the following are true: the output file exists; it is newer than the input file; and the
@@ -834,6 +820,8 @@ where
             && let Ok(outc) = read_to_string(outp)
         {
             if outc.contains(&cache.to_string()) {
+                let (grm, _, _) = code_gen.take_parser();
+
                 return Ok(CTParser {
                     regenerated: false,
                     rule_ids,
@@ -861,36 +849,8 @@ where
         // confusing than the alternatives).
         fs::remove_file(outp).ok();
 
-        let (sgraph, stable) = from_yacc(&grm, Minimiser::Pager)?;
-        if self.error_on_conflicts
-            && let Some(c) = stable.conflicts()
-        {
-            match (grm.expect(), grm.expectrr()) {
-                (Some(i), Some(j)) if i == c.sr_len() && j == c.rr_len() => (),
-                (Some(i), None) if i == c.sr_len() && 0 == c.rr_len() => (),
-                (None, Some(j)) if 0 == c.sr_len() && j == c.rr_len() => (),
-                (None, None) if 0 == c.rr_len() && 0 == c.sr_len() => (),
-                _ => {
-                    let conflicts_diagnostic = src_env.yacc_diag().format_conflicts::<LexerTypesT>(
-                        &grm,
-                        build_env.ast_validation().ast(),
-                        c,
-                        &sgraph,
-                        &stable,
-                    );
-                    return Err(Box::new(CTConflictsError {
-                        conflicts_diagnostic,
-                        phantom: PhantomData,
-                        #[cfg(test)]
-                        stable,
-                    }));
-                }
-            }
-        }
-
         if let Some(ref mut inspector_rt) = self.inspect_rt {
-            let rt: RTParserBuilder<'_, StorageT, LexerTypesT> =
-                RTParserBuilder::new(&grm, &stable);
+            let rt: RTParserBuilder<'_, StorageT, LexerTypesT> = RTParserBuilder::new(grm, stable);
             let rt = if let Some(rk) = self.recoverer {
                 rt.recoverer(rk)
             } else {
@@ -918,14 +878,15 @@ where
         }
 
         self.output_file(
-            &grm,
-            &stable,
+            grm,
+            stable,
             &derived_mod_name,
             outp,
             &format!("/* CACHE INFORMATION {} */\n", cache),
             src_env.yacc_diag(),
             &build_env,
         )?;
+        let (grm, sgraph, stable) = code_gen.take_parser();
         let conflicts = if stable.conflicts().is_some() {
             Some((sgraph, stable))
         } else {
