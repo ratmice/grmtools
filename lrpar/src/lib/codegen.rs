@@ -1,11 +1,11 @@
 #![deny(unfulfilled_lint_expectations)]
 #![expect(dead_code)]
 
-use std::{error::Error, fmt, marker::PhantomData, path::Path};
+use std::{error::Error, fmt, hash::Hash, marker::PhantomData, path::Path};
 
 use crate::{
     LexerTypes, RecoveryKind, RustEdition, SerialisationFormat, Visibility,
-    ctbuilder::{ERROR, indent},
+    ctbuilder::{CTConflictsError, ERROR, FixIntConfig, VarIntConfig, indent},
     diagnostics::{DiagnosticFormatter, SpannedDiagnosticFormatter},
 };
 
@@ -14,7 +14,9 @@ use cfgrammar::{
     header::{GrmtoolsSectionParser, Header, HeaderValue},
     yacc::{YaccGrammar, YaccKind, ast::ASTWithValidityInfo},
 };
-use lrtable::{StateGraph, StateTable};
+
+use lrtable::{Minimiser, StateGraph, StateTable, from_yacc};
+use wincode::SchemaWrite;
 
 pub(crate) struct ParserSrcEnv<'a> {
     src: &'a str,
@@ -328,6 +330,103 @@ where
 
     pub(crate) fn yacc_kind(&self) -> YaccKind {
         self.ast_with_validity_info.yacc_kind()
+    }
+
+    pub(crate) fn code_generator(
+        &self,
+        src_env: &ParserSrcEnv,
+        timestamp: &str,
+    ) -> Result<ParserCodegen<LexerTypesT>, Box<dyn Error>> {
+        let grm = match YaccGrammar::<LexerTypesT::StorageT>::new_from_ast_with_validity_info(
+            &self.ast_with_validity_info,
+        ) {
+            Ok(grm) => grm,
+            Err(errs) => {
+                let mut out = String::new();
+                out.push_str(&format!(
+                    "\n{ERROR}{}\n",
+                    src_env.yacc_diag().file_location_msg("", None)
+                ));
+                for e in errs {
+                    out.push_str(&indent(
+                        "     ",
+                        &src_env.yacc_diag().format_error(e).to_string(),
+                    ));
+                    out.push('\n');
+                }
+                return Err(ErrorString(out).into());
+            }
+        };
+
+        let (sgraph, stable) = from_yacc(&grm, Minimiser::Pager)?;
+        if self.cache_args.error_on_conflicts
+            && let Some(c) = stable.conflicts()
+        {
+            match (grm.expect(), grm.expectrr()) {
+                (Some(i), Some(j)) if i == c.sr_len() && j == c.rr_len() => (),
+                (Some(i), None) if i == c.sr_len() && 0 == c.rr_len() => (),
+                (None, Some(j)) if 0 == c.sr_len() && j == c.rr_len() => (),
+                (None, None) if 0 == c.rr_len() && 0 == c.sr_len() => (),
+                _ => {
+                    let conflicts_diagnostic = src_env.yacc_diag().format_conflicts::<LexerTypesT>(
+                        &grm,
+                        self.ast_with_validity_info.ast(),
+                        c,
+                        &sgraph,
+                        &stable,
+                    );
+                    return Err(Box::new(CTConflictsError {
+                        conflicts_diagnostic,
+                        phantom: PhantomData,
+                        #[cfg(test)]
+                        stable,
+                    }));
+                }
+            }
+        }
+
+        Ok(ParserCodegen {
+            grm,
+            stable,
+            sgraph,
+            timestamp: timestamp.to_string(),
+        })
+    }
+}
+
+impl<LexerTypesT> ParserCodegen<LexerTypesT>
+where
+    LexerTypesT: LexerTypes,
+    usize: num_traits::AsPrimitive<LexerTypesT::StorageT>,
+    LexerTypesT::StorageT: 'static
+        + fmt::Debug
+        + Hash
+        + num_traits::PrimInt
+        + SchemaWrite<FixIntConfig, Src = LexerTypesT::StorageT>
+        + SchemaWrite<VarIntConfig, Src = LexerTypesT::StorageT>
+        + num_traits::Unsigned,
+    LexerTypesT: LexerTypes,
+{
+    pub(crate) fn grm(&self) -> &YaccGrammar<LexerTypesT::StorageT> {
+        &self.grm
+    }
+
+    pub(crate) fn stable(&self) -> &StateTable<LexerTypesT::StorageT> {
+        &self.stable
+    }
+
+    pub(crate) fn sgraph(&self) -> &StateGraph<LexerTypesT::StorageT> {
+        &self.sgraph
+    }
+
+    pub(crate) fn finish(
+        self,
+    ) -> (
+        YaccGrammar<LexerTypesT::StorageT>,
+        StateGraph<LexerTypesT::StorageT>,
+        StateTable<LexerTypesT::StorageT>,
+    ) {
+        (self.grm, self.sgraph, self.stable)
     }
 }
 
