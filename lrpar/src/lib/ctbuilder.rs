@@ -1,7 +1,6 @@
 //! Build grammars at compile-time so that they can be statically included into a binary.
 
 use std::{
-    any::type_name,
     collections::{HashMap, HashSet},
     env::{current_dir, var},
     error::Error,
@@ -24,7 +23,7 @@ use crate::{
 use crate::unstable_api::UnstableApi;
 
 use cfgrammar::{
-    Location, Symbol,
+    Location,
     header::{Header, HeaderError, HeaderErrorKind, HeaderValue, Namespaced, Setting, Value},
     markmap::{Entry, MergeBehavior},
     yacc::{YaccGrammar, YaccKind, YaccOriginalActionKind, ast::ASTWithValidityInfo},
@@ -33,14 +32,14 @@ use filetime::FileTime;
 use lrtable::{StateGraph, StateTable, statetable::Conflicts};
 use num_traits::{AsPrimitive, PrimInt, Unsigned};
 use proc_macro2::TokenStream;
-use quote::{ToTokens, format_ident, quote};
+use quote::{ToTokens, quote};
 use syn::{Generics, parse_quote};
 use wincode::{SchemaRead, SchemaReadOwned, SchemaWrite};
 
 pub(crate) const ACTION_PREFIX: &str = "__gt_";
 pub(crate) const ACTIONS_KIND: &str = "__GtActionsKind";
 pub(crate) const ACTIONS_KIND_PREFIX: &str = "Ak";
-const ACTIONS_KIND_HIDDEN: &str = "__GtActionsKindHidden";
+pub(crate) const ACTIONS_KIND_HIDDEN: &str = "__GtActionsKindHidden";
 
 const RUST_FILE_EXT: &str = "rs";
 
@@ -901,7 +900,7 @@ where
         let parse_function = code_gen.gen_parse_function(build_env)?;
         let action_wrappers = match self.yacckind.unwrap() {
             YaccKind::Original(YaccOriginalActionKind::UserAction) | YaccKind::Grmtools => {
-                Some(self.gen_wrappers(grm)?)
+                Some(code_gen.gen_wrappers(build_env)?)
             }
             YaccKind::Original(YaccOriginalActionKind::NoAction)
             | YaccKind::Original(YaccOriginalActionKind::GenericParseTree) => None,
@@ -962,165 +961,6 @@ where
         f.write_all(outs.as_bytes())?;
         f.write_all(cache.as_bytes())?;
         Ok(())
-    }
-
-    /// Generate the wrappers that call user actions
-    fn gen_wrappers(&self, grm: &YaccGrammar<StorageT>) -> Result<TokenStream, Box<dyn Error>> {
-        let parsed_parse_generics = make_generics(grm.parse_generics().as_deref())?;
-        let (generics, type_generics, where_clause) = parsed_parse_generics.split_for_impl();
-
-        let (parse_paramname, parse_paramdef);
-        match grm.parse_param() {
-            Some((name, tyname)) => {
-                parse_paramname = str::parse::<TokenStream>(name)?;
-                let ty = str::parse::<TokenStream>(tyname)?;
-                parse_paramdef = quote!(#parse_paramname: #ty);
-            }
-            None => {
-                parse_paramname = quote!(());
-                parse_paramdef = quote! {_: ()};
-            }
-        };
-
-        let mut wrappers = TokenStream::new();
-        for pidx in grm.iter_pidxs() {
-            let ridx = grm.prod_to_rule(pidx);
-
-            // Iterate over all $-arguments and replace them with their respective
-            // element from the argument vector (e.g. $1 is replaced by args[0]). At
-            // the same time extract &str from tokens and actiontype from nonterminals.
-            let wrapper_fn = format_ident!("{}wrapper_{}", ACTION_PREFIX, usize::from(pidx));
-            let ridx_var = format_ident!("{}ridx", ACTION_PREFIX);
-            let lexer_var = format_ident!("{}lexer", ACTION_PREFIX);
-            let span_var = format_ident!("{}span", ACTION_PREFIX);
-            let args_var = format_ident!("{}args", ACTION_PREFIX);
-            let storaget = str::parse::<TokenStream>(type_name::<StorageT>())?;
-            let lexertypest = str::parse::<TokenStream>(type_name::<LexerTypesT>())?;
-            let actionskind = str::parse::<TokenStream>(ACTIONS_KIND)?;
-            let edition_lifetime = if self.rust_edition != RustEdition::Rust2015 {
-                Some(quote!('_,))
-            } else {
-                None
-            };
-            let mut wrapper_fn_body = TokenStream::new();
-            if grm.action(pidx).is_some() {
-                // Unpack the arguments passed to us by the drain
-                for i in 0..grm.prod(pidx).len() {
-                    let arg = format_ident!("{}arg_{}", ACTION_PREFIX, i + 1);
-                    wrapper_fn_body.extend(match grm.prod(pidx)[i] {
-                        Symbol::Rule(ref_ridx) => {
-                            let ref_ridx = usize::from(ref_ridx);
-                            let actionvariant = format_ident!("{}{}", ACTIONS_KIND_PREFIX, ref_ridx);
-                            quote! {
-                                #[allow(clippy::let_unit_value)]
-                                let #arg = match #args_var.next().unwrap() {
-                                    ::lrpar::parser::AStackType::ActionType(#actionskind::#type_generics::#actionvariant(x)) => x,
-                                    _ => unreachable!()
-                                };
-                            }
-                        }
-                        Symbol::Token(_) => {
-                            quote! {
-                                let #arg = match #args_var.next().unwrap() {
-                                    ::lrpar::parser::AStackType::Lexeme(l) => {
-                                        if l.faulty() {
-                                            Err(l)
-                                        } else {
-                                            Ok(l)
-                                        }
-                                    },
-                                    ::lrpar::parser::AStackType::ActionType(_) => unreachable!()
-                                };
-                            }
-                        }
-                    })
-                }
-
-                // Call the user code
-                let args = (0..grm.prod(pidx).len())
-                    .map(|i| format_ident!("{}arg_{}", ACTION_PREFIX, i + 1))
-                    .collect::<Vec<_>>();
-                let action_fn = format_ident!("{}action_{}", ACTION_PREFIX, usize::from(pidx));
-                let actionsvariant = format_ident!("{}{}", ACTIONS_KIND_PREFIX, usize::from(ridx));
-
-                wrapper_fn_body.extend(match grm.actiontype(ridx) {
-                    Some(s) if s == "()" => {
-                        // If the rule `r` that we're calling has the unit type then Clippy will warn that
-                        // `enum::A(wrapper_r())` is pointless. We thus have to split it into two:
-                        // `wrapper_r(); enum::A(())`.
-                        quote! {
-                            #action_fn(#ridx_var, #lexer_var, #span_var, #parse_paramname, #(#args,)*);
-                            #actionskind::#type_generics::#actionsvariant(())
-                        }
-                    }
-                    _ => {
-                        quote! {
-                            #actionskind::#type_generics::#actionsvariant(#action_fn(#ridx_var, #lexer_var, #span_var, #parse_paramname, #(#args,)*))
-                        }
-                    }
-                })
-            } else if pidx == grm.start_prod() {
-                wrapper_fn_body.extend(quote!(unreachable!()));
-            } else {
-                unreachable!(
-                    "Production in rule '{}' must have an action body, which should have been handled by gen_user_actions.",
-                    grm.rule_name_str(grm.prod_to_rule(pidx))
-                );
-            };
-
-            let attrib = if pidx == grm.start_prod() {
-                // The start prod has an unreachable body so it doesn't use it's variables.
-                Some(quote!(#[allow(unused_variables)]))
-            } else {
-                None
-            };
-            wrappers.extend(quote! {
-                #attrib
-                fn #wrapper_fn #generics (
-                    #ridx_var: ::cfgrammar::RIdx<#storaget>,
-                    #lexer_var: &'lexer dyn ::lrpar::NonStreamingLexer<'input, #lexertypest>,
-                    #span_var: ::cfgrammar::Span,
-                    mut #args_var: ::std::vec::Drain<#edition_lifetime ::lrpar::parser::AStackType<<#lexertypest as ::lrpar::LexerTypes>::LexemeT, #actionskind #type_generics>>,
-                    #parse_paramdef
-                ) -> #actionskind #type_generics
-                #where_clause
-                {
-                    #wrapper_fn_body
-                }
-             })
-        }
-        let mut actionskindvariants = Vec::new();
-        let actionskindhidden = format_ident!("_{}", ACTIONS_KIND_HIDDEN);
-        let actionskind = str::parse::<TokenStream>(ACTIONS_KIND).unwrap();
-        let mut phantom_data_type = Vec::new();
-        for ridx in grm.iter_rules() {
-            if let Some(actiont) = grm.actiontype(ridx) {
-                let actionskindvariant =
-                    format_ident!("{}{}", ACTIONS_KIND_PREFIX, usize::from(ridx));
-                let actiont = str::parse::<TokenStream>(actiont).unwrap();
-                actionskindvariants.push(quote! {
-                    #actionskindvariant(#actiont)
-                })
-            }
-        }
-        for lifetime in parsed_parse_generics.lifetimes() {
-            let lifetime = &lifetime.lifetime;
-            phantom_data_type.push(quote! { &#lifetime () });
-        }
-        for type_param in parsed_parse_generics.type_params() {
-            let ident = &type_param.ident;
-            phantom_data_type.push(quote! { #ident });
-        }
-        actionskindvariants.push(quote! {
-            #actionskindhidden(::std::marker::PhantomData<(#(#phantom_data_type,)*)>)
-        });
-        wrappers.extend(quote! {
-            #[allow(dead_code)]
-            enum #actionskind #generics #where_clause {
-                #(#actionskindvariants,)*
-            }
-        });
-        Ok(wrappers)
     }
 }
 
