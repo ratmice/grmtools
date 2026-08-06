@@ -16,7 +16,7 @@ use std::{
 
 use crate::{
     LexerTypes, RTParserBuilder, RecoveryKind,
-    codegen::{ParserBuildEnv, ParserBuildEnvArgs, ParserSrcEnv},
+    codegen::{ParserBuildEnv, ParserBuildEnvArgs, ParserCodegen, ParserSrcEnv},
     diagnostics::{DiagnosticFormatter, SpannedDiagnosticFormatter},
 };
 
@@ -32,13 +32,12 @@ use cfgrammar::{
 use filetime::FileTime;
 use lrtable::{StateGraph, StateTable, statetable::Conflicts};
 use num_traits::{AsPrimitive, PrimInt, Unsigned};
-use proc_macro2::{Literal, TokenStream};
-use quote::{ToTokens, TokenStreamExt, format_ident, quote};
+use proc_macro2::TokenStream;
+use quote::{ToTokens, format_ident, quote};
 use syn::{Generics, parse_quote};
 use wincode::{SchemaRead, SchemaReadOwned, SchemaWrite};
 
 const ACTION_PREFIX: &str = "__gt_";
-const GLOBAL_PREFIX: &str = "__GT_";
 const ACTIONS_KIND: &str = "__GtActionsKind";
 const ACTIONS_KIND_PREFIX: &str = "Ak";
 const ACTIONS_KIND_HIDDEN: &str = "__GtActionsKindHidden";
@@ -57,18 +56,6 @@ pub(crate) struct CTConflictsError<StorageT: Eq + Hash> {
     #[cfg_attr(test, allow(dead_code))]
     pub(crate) stable: StateTable<StorageT>,
     pub(crate) phantom: PhantomData<StorageT>,
-}
-
-/// The quote impl of `ToTokens` for `usize` prints literal values
-/// including a type suffix for example `0usize`.
-///
-/// This wrapper omits the type suffix emitting `0` instead.
-struct UnsuffixedUsize(usize);
-
-impl ToTokens for UnsuffixedUsize {
-    fn to_tokens(&self, tokens: &mut TokenStream) {
-        tokens.append(Literal::usize_unsuffixed(self.0))
-    }
 }
 
 impl<StorageT> fmt::Display for CTConflictsError<StorageT>
@@ -771,6 +758,7 @@ where
             &format!("/* CACHE INFORMATION {} */\n", cache_str),
             src_env.yacc_diag(),
             &build_env,
+            &code_gen,
         )?;
         let (grm, sgraph, stable) = code_gen.take_parser();
         let conflicts = if stable.conflicts().is_some() {
@@ -902,6 +890,7 @@ where
         cache: &str,
         diag: &SpannedDiagnosticFormatter,
         build_env: &ParserBuildEnv<'_, LexerTypesT>,
+        code_gen: &ParserCodegen<LexerTypesT>,
     ) -> Result<(), Box<dyn Error>> {
         let visibility = self.visibility.clone();
         let user_actions = if let Some(
@@ -912,8 +901,8 @@ where
         } else {
             None
         };
-        let rule_consts = self.gen_rule_consts(grm)?;
-        let token_epp = self.gen_token_epp(grm)?;
+        let rule_consts = code_gen.gen_rule_consts(grm)?;
+        let token_epp = code_gen.gen_token_epp(grm)?;
         let parse_function = self.gen_parse_function(grm, stable, build_env)?;
         let action_wrappers = match self.yacckind.unwrap() {
             YaccKind::Original(YaccOriginalActionKind::UserAction) | YaccKind::Grmtools => {
@@ -1154,50 +1143,6 @@ where
                 let grm = __data.grm();
                 let stable = __data.stable();
                 #run_parser
-            }
-        })
-    }
-
-    fn gen_rule_consts(
-        &self,
-        grm: &YaccGrammar<StorageT>,
-    ) -> Result<TokenStream, proc_macro2::LexError> {
-        let mut toks = TokenStream::new();
-        for ridx in grm.iter_rules() {
-            if !grm.rule_to_prods(ridx).contains(&grm.start_prod()) {
-                let r_const = format_ident!("R_{}", grm.rule_name_str(ridx).to_ascii_uppercase());
-                let storage_ty = str::parse::<TokenStream>(type_name::<StorageT>())?;
-                let ridx = UnsuffixedUsize(usize::from(ridx));
-                toks.extend(quote! {
-                    #[allow(dead_code)]
-                    pub const #r_const: #storage_ty = #ridx;
-                });
-            }
-        }
-        Ok(toks)
-    }
-
-    fn gen_token_epp(
-        &self,
-        grm: &YaccGrammar<StorageT>,
-    ) -> Result<TokenStream, proc_macro2::LexError> {
-        use crate::codegen::QuoteOption;
-        let mut tidxs = Vec::new();
-        for tidx in grm.iter_tidxs() {
-            tidxs.push(QuoteOption(grm.token_epp(tidx)));
-        }
-        let const_epp_ident = format_ident!("{}EPP", GLOBAL_PREFIX);
-        let storage_ty = str::parse::<TokenStream>(type_name::<StorageT>())?;
-        Ok(quote! {
-            const #const_epp_ident: &[::std::option::Option<&str>] = &[
-                #(#tidxs,)*
-            ];
-
-            /// Return the %epp entry for token `tidx` (where `None` indicates \"the token has no
-            /// pretty-printed value\"). Panics if `tidx` doesn't exist.
-            #[allow(dead_code)]
-            pub fn token_epp<'a>(tidx: ::cfgrammar::TIdx<#storage_ty>) -> ::std::option::Option<&'a str> {
-                #const_epp_ident[usize::from(tidx)]
             }
         })
     }

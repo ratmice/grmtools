@@ -1,14 +1,14 @@
 #![deny(unfulfilled_lint_expectations)]
 #![expect(dead_code)]
 
-use std::{error::Error, fmt, hash::Hash, marker::PhantomData, path::Path};
+use std::{any::type_name, error::Error, fmt, hash::Hash, marker::PhantomData, path::Path};
 
 use cfgrammar::{
     Location, Span,
     header::{GrmtoolsSectionParser, Header, HeaderValue},
     yacc::{YaccGrammar, YaccKind, ast::ASTWithValidityInfo},
 };
-use proc_macro2::TokenStream;
+use proc_macro2::{Literal, TokenStream};
 
 use crate::{
     LexerTypes, RecoveryKind, RustEdition, SerialisationFormat, Visibility,
@@ -17,8 +17,10 @@ use crate::{
 };
 
 use lrtable::{Minimiser, StateGraph, StateTable, from_yacc};
-use quote::{ToTokens, TokenStreamExt, quote};
+use quote::{ToTokens, TokenStreamExt, format_ident, quote};
 use wincode::SchemaWrite;
+
+const GLOBAL_PREFIX: &str = "__GT_";
 
 pub(crate) struct ParserSrcEnv<'a> {
     src: &'a str,
@@ -448,6 +450,49 @@ where
         let cache_info_str = cache_info.to_string();
         quote!(#cache_info_str)
     }
+
+    pub(crate) fn gen_rule_consts(
+        &self,
+        grm: &YaccGrammar<LexerTypesT::StorageT>,
+    ) -> Result<TokenStream, proc_macro2::LexError> {
+        let mut toks = TokenStream::new();
+        for ridx in grm.iter_rules() {
+            if !grm.rule_to_prods(ridx).contains(&grm.start_prod()) {
+                let r_const = format_ident!("R_{}", grm.rule_name_str(ridx).to_ascii_uppercase());
+                let storage_ty = str::parse::<TokenStream>(type_name::<LexerTypesT::StorageT>())?;
+                let ridx = UnsuffixedUsize(usize::from(ridx));
+                toks.extend(quote! {
+                    #[allow(dead_code)]
+                    pub const #r_const: #storage_ty = #ridx;
+                });
+            }
+        }
+        Ok(toks)
+    }
+
+    pub(crate) fn gen_token_epp(
+        &self,
+        grm: &YaccGrammar<LexerTypesT::StorageT>,
+    ) -> Result<TokenStream, proc_macro2::LexError> {
+        let mut tidxs = Vec::new();
+        for tidx in grm.iter_tidxs() {
+            tidxs.push(QuoteOption(grm.token_epp(tidx)));
+        }
+        let const_epp_ident = format_ident!("{}EPP", GLOBAL_PREFIX);
+        let storage_ty = str::parse::<TokenStream>(type_name::<LexerTypesT::StorageT>())?;
+        Ok(quote! {
+            const #const_epp_ident: &[::std::option::Option<&str>] = &[
+                #(#tidxs,)*
+            ];
+
+            /// Return the %epp entry for token `tidx` (where `None` indicates \"the token has no
+            /// pretty-printed value\"). Panics if `tidx` doesn't exist.
+            #[allow(dead_code)]
+            pub fn token_epp<'a>(tidx: ::cfgrammar::TIdx<#storage_ty>) -> ::std::option::Option<&'a str> {
+                #const_epp_ident[usize::from(tidx)]
+            }
+        })
+    }
 }
 
 /// A string which uses `Display` for it's `Debug` impl.
@@ -501,6 +546,18 @@ impl ToTokens for QuoteToString<'_> {
     fn to_tokens(&self, tokens: &mut TokenStream) {
         let x = &self.0;
         tokens.append_all(quote! { #x.to_string() });
+    }
+}
+
+/// The quote impl of `ToTokens` for `usize` prints literal values
+/// including a type suffix for example `0usize`.
+///
+/// This wrapper omits the type suffix emitting `0` instead.
+struct UnsuffixedUsize(usize);
+
+impl ToTokens for UnsuffixedUsize {
+    fn to_tokens(&self, tokens: &mut TokenStream) {
+        tokens.append(Literal::usize_unsuffixed(self.0))
     }
 }
 
