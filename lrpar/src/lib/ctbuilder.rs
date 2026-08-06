@@ -898,7 +898,7 @@ where
         let rule_consts = code_gen.gen_rule_consts(grm)?;
         let token_epp = code_gen.gen_token_epp(grm)?;
         let parse_function = code_gen.gen_parse_function(build_env)?;
-        let action_wrappers = match self.yacckind.unwrap() {
+        let action_wrappers = match build_env.ast_validation().yacc_kind() {
             YaccKind::Original(YaccOriginalActionKind::UserAction) | YaccKind::Grmtools => {
                 Some(code_gen.gen_wrappers(build_env)?)
             }
@@ -907,19 +907,18 @@ where
             _ => unreachable!(),
         };
 
-        let additional_decls =
-            if let Some(YaccKind::Original(YaccOriginalActionKind::GenericParseTree)) =
-                self.yacckind
-            {
-                // `lrpar::Node`` is deprecated within the lrpar crate, but not from within this module,
-                // Once it is removed from `lrpar`, we should move the declaration here entirely.
-                Some(quote! {
-                            #[allow(unused_imports)]
-                            pub use ::lrpar::parser::_deprecated_moved_::Node;
-                })
-            } else {
-                None
-            };
+        let additional_decls = if let YaccKind::Original(YaccOriginalActionKind::GenericParseTree) =
+            build_env.ast_validation().yacc_kind()
+        {
+            // `lrpar::Node`` is deprecated within the lrpar crate, but not from within this module,
+            // Once it is removed from `lrpar`, we should move the declaration here entirely.
+            Some(quote! {
+                        #[allow(unused_imports)]
+                        pub use ::lrpar::parser::_deprecated_moved_::Node;
+            })
+        } else {
+            None
+        };
 
         let mod_name =
             match syn::parse_str::<proc_macro2::Ident>(mod_name) {
