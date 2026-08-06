@@ -17,14 +17,14 @@ use std::{
 use crate::{
     LexerTypes, RTParserBuilder, RecoveryKind,
     codegen::{ParserBuildEnv, ParserBuildEnvArgs, ParserCodegen, ParserSrcEnv},
-    diagnostics::{DiagnosticFormatter, SpannedDiagnosticFormatter},
+    diagnostics::DiagnosticFormatter,
 };
 
 #[cfg(feature = "_unstable_api")]
 use crate::unstable_api::UnstableApi;
 
 use cfgrammar::{
-    Location, RIdx, Span, Symbol,
+    Location, RIdx, Symbol,
     header::{Header, HeaderError, HeaderErrorKind, HeaderValue, Namespaced, Setting, Value},
     markmap::{Entry, MergeBehavior},
     yacc::{YaccGrammar, YaccKind, YaccOriginalActionKind, ast::ASTWithValidityInfo},
@@ -37,7 +37,7 @@ use quote::{ToTokens, format_ident, quote};
 use syn::{Generics, parse_quote};
 use wincode::{SchemaRead, SchemaReadOwned, SchemaWrite};
 
-const ACTION_PREFIX: &str = "__gt_";
+pub(crate) const ACTION_PREFIX: &str = "__gt_";
 const ACTIONS_KIND: &str = "__GtActionsKind";
 const ACTIONS_KIND_PREFIX: &str = "Ak";
 const ACTIONS_KIND_HIDDEN: &str = "__GtActionsKindHidden";
@@ -756,9 +756,9 @@ where
             build_env.mod_name(),
             outp,
             &format!("/* CACHE INFORMATION {} */\n", cache_str),
-            src_env.yacc_diag(),
             &build_env,
             &code_gen,
+            &src_env,
         )?;
         let (grm, sgraph, stable) = code_gen.take_parser();
         let conflicts = if stable.conflicts().is_some() {
@@ -888,16 +888,16 @@ where
         mod_name: &str,
         outp_rs: P,
         cache: &str,
-        diag: &SpannedDiagnosticFormatter,
         build_env: &ParserBuildEnv<'_, LexerTypesT>,
         code_gen: &ParserCodegen<LexerTypesT>,
+        src_env: &ParserSrcEnv,
     ) -> Result<(), Box<dyn Error>> {
         let visibility = self.visibility.clone();
         let user_actions = if let Some(
             YaccKind::Original(YaccOriginalActionKind::UserAction) | YaccKind::Grmtools,
         ) = self.yacckind
         {
-            Some(self.gen_user_actions(grm, diag)?)
+            Some(code_gen.gen_user_actions(src_env)?)
         } else {
             None
         };
@@ -1306,175 +1306,6 @@ where
         Ok(wrappers)
     }
 
-    /// Generate the user action functions (if any).
-    fn gen_user_actions(
-        &self,
-        grm: &YaccGrammar<StorageT>,
-        diag: &SpannedDiagnosticFormatter,
-    ) -> Result<TokenStream, Box<dyn Error>> {
-        let programs = grm
-            .programs()
-            .as_ref()
-            .map(|s| str::parse::<TokenStream>(s))
-            .transpose()?;
-        let mut action_fns = TokenStream::new();
-        // Convert actions to functions
-        let parsed_parse_generics = make_generics(grm.parse_generics().as_deref())?;
-        let (generics, _, where_clause) = parsed_parse_generics.split_for_impl();
-        let (parse_paramname, parse_paramdef, parse_param_unit);
-        match grm.parse_param() {
-            Some((name, tyname)) => {
-                parse_param_unit = tyname.trim() == "()";
-                parse_paramname = str::parse::<TokenStream>(name)?;
-                let ty = str::parse::<TokenStream>(tyname)?;
-                parse_paramdef = quote!(#parse_paramname: #ty);
-            }
-            None => {
-                parse_param_unit = true;
-                parse_paramname = quote!(());
-                parse_paramdef = quote! {_: ()};
-            }
-        };
-        for pidx in grm.iter_pidxs() {
-            if pidx == grm.start_prod() {
-                continue;
-            }
-
-            // Work out the right type for each argument
-            let mut args = Vec::with_capacity(grm.prod(pidx).len());
-            for i in 0..grm.prod(pidx).len() {
-                let argt = match grm.prod(pidx)[i] {
-                    Symbol::Rule(ref_ridx) => {
-                        if let Some(action_type) = grm.actiontype(ref_ridx).as_ref() {
-                            str::parse::<TokenStream>(action_type)?
-                        } else {
-                            let mut s = String::from("\n");
-                            let rule_span = grm.rule_name_span(ref_ridx);
-                            s.push_str(&diag.file_location_msg("Error", Some(rule_span)));
-                            s.push('\n');
-                            s.push_str(&diag.underline_span_with_text(
-                                rule_span,
-                                "Rule missing action type".to_string(),
-                                '^',
-                            ));
-                            return Err(ErrorString(s).into());
-                        }
-                    }
-                    Symbol::Token(_) => {
-                        let lexemet =
-                            str::parse::<TokenStream>(type_name::<LexerTypesT::LexemeT>())?;
-                        quote!(::std::result::Result<#lexemet, #lexemet>)
-                    }
-                };
-                let arg = format_ident!("{}arg_{}", ACTION_PREFIX, i + 1);
-                args.push(quote!(mut #arg: #argt));
-            }
-
-            // If this rule's `actiont` is `()` then Clippy will warn that the return type `-> ()`
-            // is pointless (which is true). We therefore avoid outputting a return type if actiont
-            // is the unit type.
-            let returnt = {
-                let actiont = grm.actiontype(grm.prod_to_rule(pidx)).as_ref().unwrap();
-                if actiont == "()" {
-                    None
-                } else {
-                    let actiont = str::parse::<TokenStream>(actiont)?;
-                    Some(quote!( -> #actiont))
-                }
-            };
-            let action_fn = format_ident!("{}action_{}", ACTION_PREFIX, usize::from(pidx));
-            let lexer_var = format_ident!("{}lexer", ACTION_PREFIX);
-            let span_var = format_ident!("{}span", ACTION_PREFIX);
-            let ridx_var = format_ident!("{}ridx", ACTION_PREFIX);
-            let storaget = str::parse::<TokenStream>(type_name::<StorageT>())?;
-            let lexertypest = str::parse::<TokenStream>(type_name::<LexerTypesT>())?;
-            let bind_parse_param = if !parse_param_unit {
-                Some(quote! {let _ = #parse_paramname;})
-            } else {
-                None
-            };
-
-            // Iterate over all $-arguments and replace them with their respective
-            // element from the argument vector (e.g. $1 is replaced by args[0]).
-            let pre_action = grm.action(pidx).as_ref().ok_or_else(|| {
-                let mut s = String::from("\n");
-                let span = grm.prod_span(pidx);
-                s.push_str(&diag.file_location_msg("Error", Some(span)));
-                s.push('\n');
-                s.push_str(&diag.underline_span_with_text(
-                    span,
-                    "Production is missing action code".to_string(),
-                    '^',
-                ));
-                ErrorString(s)
-            })?;
-            let mut last = 0;
-            let mut outs = String::new();
-            loop {
-                match pre_action[last..].find('$') {
-                    Some(off) => {
-                        if pre_action[last + off..].starts_with("$$") {
-                            outs.push_str(&pre_action[last..last + off + "$".len()]);
-                            last = last + off + "$$".len();
-                        } else if pre_action[last + off..].starts_with("$lexer") {
-                            outs.push_str(&pre_action[last..last + off]);
-                            write!(outs, "{prefix}lexer", prefix = ACTION_PREFIX).ok();
-                            last = last + off + "$lexer".len();
-                        } else if pre_action[last + off..].starts_with("$span") {
-                            outs.push_str(&pre_action[last..last + off]);
-                            write!(outs, "{prefix}span", prefix = ACTION_PREFIX).ok();
-                            last = last + off + "$span".len();
-                        } else if last + off + 1 < pre_action.len()
-                            && pre_action[last + off + 1..].starts_with(|c: char| c.is_numeric())
-                        {
-                            outs.push_str(&pre_action[last..last + off]);
-                            write!(outs, "{prefix}arg_", prefix = ACTION_PREFIX).ok();
-                            last = last + off + "$".len();
-                        } else {
-                            let span = grm.action_span(pidx).unwrap();
-                            let inner_span =
-                                Span::new(span.start() + last + off + "$".len(), span.end());
-                            let mut s = String::from("\n");
-                            s.push_str(&diag.file_location_msg("Error", Some(inner_span)));
-                            s.push('\n');
-                            s.push_str(&diag.underline_span_with_text(
-                                inner_span,
-                                "Unknown text following '$'".to_string(),
-                                '^',
-                            ));
-                            return Err(ErrorString(s).into());
-                        }
-                    }
-                    None => {
-                        outs.push_str(&pre_action[last..]);
-                        break;
-                    }
-                }
-            }
-
-            let action_body = str::parse::<TokenStream>(&outs)?;
-            action_fns.extend(quote! {
-                #[allow(clippy::too_many_arguments)]
-                fn #action_fn #generics (
-                    #ridx_var: ::cfgrammar::RIdx<#storaget>,
-                    #lexer_var: &'lexer dyn ::lrpar::NonStreamingLexer<'input, #lexertypest>,
-                    #span_var: ::cfgrammar::Span,
-                    #parse_paramdef,
-                    #(#args,)*
-                ) #returnt
-                #where_clause
-                {
-                    #bind_parse_param
-                    #action_body
-                }
-            })
-        }
-        Ok(quote! {
-            #programs
-            #action_fns
-        })
-    }
-
     /// Return the `RIdx` of the %start rule in the grammar (which will not be the same as
     /// grm.start_rule_idx because the latter has an additional rule insert by cfgrammar
     /// which then calls the user's %start rule).
@@ -1604,7 +1435,7 @@ pub(crate) fn indent(indent: &str, s: &str) -> String {
     format!("{indent}{}\n", s.trim_end_matches('\n')).replace('\n', &format!("\n{}", indent))
 }
 
-fn make_generics(parse_generics: Option<&str>) -> Result<Generics, Box<dyn Error>> {
+pub(crate) fn make_generics(parse_generics: Option<&str>) -> Result<Generics, Box<dyn Error>> {
     if let Some(parse_generics) = parse_generics {
         let tokens = str::parse::<TokenStream>(parse_generics)?;
         match syn::parse2(quote!(<'lexer, 'input: 'lexer, #tokens>)) {
