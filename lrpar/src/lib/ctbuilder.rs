@@ -59,22 +59,6 @@ pub(crate) struct CTConflictsError<StorageT: Eq + Hash> {
     pub(crate) phantom: PhantomData<StorageT>,
 }
 
-/// The quote impl of `ToTokens` for `Option` prints an empty string for `None`
-/// and the inner value for `Some(inner_value)`.
-///
-/// This wrapper instead emits both `Some` and `None` variants.
-/// See: [quote #20](https://github.com/dtolnay/quote/issues/20)
-struct QuoteOption<T>(Option<T>);
-
-impl<T: ToTokens> ToTokens for QuoteOption<T> {
-    fn to_tokens(&self, tokens: &mut TokenStream) {
-        tokens.append_all(match self.0 {
-            Some(ref t) => quote! { ::std::option::Option::Some(#t) },
-            None => quote! { ::std::option::Option::None },
-        });
-    }
-}
-
 /// The quote impl of `ToTokens` for `usize` prints literal values
 /// including a type suffix for example `0usize`.
 ///
@@ -84,27 +68,6 @@ struct UnsuffixedUsize(usize);
 impl ToTokens for UnsuffixedUsize {
     fn to_tokens(&self, tokens: &mut TokenStream) {
         tokens.append(Literal::usize_unsuffixed(self.0))
-    }
-}
-
-/// This wrapper adds a missing impl of `ToTokens` for tuples.
-/// For a tuple `(a, b)` emits `(a.to_tokens(), b.to_tokens())`
-struct QuoteTuple<T>(T);
-
-impl<A: ToTokens, B: ToTokens> ToTokens for QuoteTuple<(A, B)> {
-    fn to_tokens(&self, tokens: &mut TokenStream) {
-        let (a, b) = &self.0;
-        tokens.append_all(quote!((#a, #b)));
-    }
-}
-
-/// The wrapped `&str` value will be emitted with a call to `to_string()`
-struct QuoteToString<'a>(&'a str);
-
-impl ToTokens for QuoteToString<'_> {
-    fn to_tokens(&self, tokens: &mut TokenStream) {
-        let x = &self.0;
-        tokens.append_all(quote! { #x.to_string() });
     }
 }
 
@@ -178,48 +141,6 @@ pub enum RustEdition {
     Rust2015,
     Rust2018,
     Rust2021,
-}
-
-impl RustEdition {
-    fn to_variant_tokens(self) -> TokenStream {
-        match self {
-            RustEdition::Rust2015 => quote!(::lrpar::RustEdition::Rust2015),
-            RustEdition::Rust2018 => quote!(::lrpar::RustEdition::Rust2018),
-            RustEdition::Rust2021 => quote!(::lrpar::RustEdition::Rust2021),
-        }
-    }
-}
-
-impl ToTokens for Visibility {
-    fn to_tokens(&self, tokens: &mut TokenStream) {
-        tokens.extend(match self {
-            Visibility::Private => quote!(),
-            Visibility::Public => quote! {pub},
-            Visibility::PublicSuper => quote! {pub(super)},
-            Visibility::PublicSelf => quote! {pub(self)},
-            Visibility::PublicCrate => quote! {pub(crate)},
-            Visibility::PublicIn(data) => {
-                let other = str::parse::<TokenStream>(data).unwrap();
-                quote! {pub(in #other)}
-            }
-        })
-    }
-}
-
-impl Visibility {
-    fn to_variant_tokens(&self) -> TokenStream {
-        match self {
-            Visibility::Private => quote!(::lrpar::Visibility::Private),
-            Visibility::Public => quote!(::lrpar::Visibility::Public),
-            Visibility::PublicSuper => quote!(::lrpar::Visibility::PublicSuper),
-            Visibility::PublicSelf => quote!(::lrpar::Visibility::PublicSelf),
-            Visibility::PublicCrate => quote!(::lrpar::Visibility::PublicCrate),
-            Visibility::PublicIn(data) => {
-                let data = QuoteToString(data);
-                quote!(::lrpar::Visibility::PublicIn(#data))
-            }
-        }
-    }
 }
 
 /// Sets the underlying encoding algorithm for serialising the `ParserData` into the generated source files.
@@ -785,7 +706,7 @@ where
             .map(|(&n, &i)| (n.to_owned(), i.as_storaget()))
             .collect::<HashMap<_, _>>();
 
-        let cache = self.rebuild_cache(build_env.mod_name(), grm);
+        let cache_str = code_gen.cache_string(&src_env, &build_env);
 
         // We don't need to go through the full rigmarole of generating an output file if all of
         // the following are true: the output file exists; it is newer than the input file; and the
@@ -800,7 +721,7 @@ where
                 > FileTime::from_last_modification_time(inmd)
             && let Ok(outc) = read_to_string(outp)
         {
-            if outc.contains(&cache.to_string()) {
+            if outc.contains(&cache_str) {
                 let (grm, _, _) = code_gen.take_parser();
 
                 return Ok(CTParser {
@@ -847,7 +768,7 @@ where
             stable,
             build_env.mod_name(),
             outp,
-            &format!("/* CACHE INFORMATION {} */\n", cache),
+            &format!("/* CACHE INFORMATION {} */\n", cache_str),
             src_env.yacc_diag(),
             &build_env,
         )?;
@@ -1059,73 +980,6 @@ where
         Ok(())
     }
 
-    /// Generate the cache, which determines if anything's changed enough that we need to
-    /// regenerate outputs and force rustc to recompile.
-    fn rebuild_cache(&self, derived_mod_name: &'_ str, grm: &YaccGrammar<StorageT>) -> TokenStream {
-        // We don't need to be particularly clever here: we just need to record the various things
-        // that could change between builds.
-        //
-        // Record the time that this version of lrpar was built. If the source code changes and
-        // rustc forces a recompile, this will change this value, causing anything which depends on
-        // this build of lrpar to be recompiled too.
-        let Self {
-            // All variables except for `output_path`, `inspect_callback` and `phantom` should
-            // be written into the cache.
-            grammar_path,
-            // I struggle to imagine the correct thing for `grammar_src`.
-            grammar_src: _,
-            // I struggle to imagine the correct thing for `from_ast`.
-            from_ast: _,
-            mod_name,
-            recoverer,
-            yacckind,
-            output_path: _,
-            error_on_conflicts,
-            warnings_are_errors,
-            show_warnings,
-            visibility,
-            rust_edition,
-            serialisation_format,
-            inspect_rt: _,
-            #[cfg(test)]
-                inspect_callback: _,
-            phantom: _,
-        } = self;
-        let build_time = env!("VERGEN_BUILD_TIMESTAMP");
-        let grammar_path = grammar_path.as_ref().unwrap().to_string_lossy();
-        let mod_name = QuoteOption(mod_name.as_deref());
-        let visibility = visibility.to_variant_tokens();
-        let rust_edition = rust_edition.to_variant_tokens();
-        let yacckind = yacckind.expect("is_some() by this point");
-        let rule_map = grm
-            .iter_tidxs()
-            .map(|tidx| {
-                QuoteTuple((
-                    usize::from(tidx),
-                    grm.token_name(tidx).unwrap_or("<unknown>"),
-                ))
-            })
-            .collect::<Vec<_>>();
-        let cache_info = quote! {
-            BUILD_TIME = #build_time
-            DERIVED_MOD_NAME = #derived_mod_name
-            ENCODING_CONFIG = #serialisation_format
-            GRAMMAR_PATH = #grammar_path
-            MOD_NAME = #mod_name
-            RECOVERER = #recoverer
-            YACC_KIND = #yacckind
-            ERROR_ON_CONFLICTS = #error_on_conflicts
-            SHOW_WARNINGS = #show_warnings
-            WARNINGS_ARE_ERRORS = #warnings_are_errors
-            RUST_EDITION = #rust_edition
-            RULE_IDS_MAP = [#(#rule_map,)*]
-            VISIBILITY = #visibility
-
-        };
-        let cache_info_str = cache_info.to_string();
-        quote!(#cache_info_str)
-    }
-
     /// Generate the main parse() function for the output file.
     fn gen_parse_function(
         &self,
@@ -1327,6 +1181,7 @@ where
         &self,
         grm: &YaccGrammar<StorageT>,
     ) -> Result<TokenStream, proc_macro2::LexError> {
+        use crate::codegen::QuoteOption;
         let mut tidxs = Vec::new();
         for tidx in grm.iter_tidxs() {
             tidxs.push(QuoteOption(grm.token_epp(tidx)));
