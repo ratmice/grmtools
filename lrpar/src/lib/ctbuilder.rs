@@ -619,7 +619,9 @@ where
             .mod_name(self.mod_name)
             .show_warnings(self.show_warnings)
             .error_on_conflicts(self.error_on_conflicts)
-            .warnings_are_errors(self.warnings_are_errors);
+            .warnings_are_errors(self.warnings_are_errors)
+            .rust_edition(self.rust_edition)
+            .visibility(self.visibility.clone());
         let build_env = src_env.build_env::<LexerTypesT>(build_args)?;
         // Temporarily we update self.yacckind and self.recoverer from the build_env
         // Until codegen reads these variables from the build_env directly.

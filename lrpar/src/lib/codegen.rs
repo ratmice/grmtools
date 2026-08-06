@@ -1,6 +1,3 @@
-#![deny(unfulfilled_lint_expectations)]
-#![expect(dead_code)]
-
 use std::{
     any::type_name,
     error::Error,
@@ -146,10 +143,6 @@ impl<'a> ParserSrcEnv<'a> {
 
     pub(crate) fn header_mut(&mut self) -> &mut Header<Location> {
         &mut self.header
-    }
-
-    pub(crate) fn header(&self) -> &Header<Location> {
-        &self.header
     }
 
     fn merge_headers(&mut self) -> Result<(), Box<dyn Error>> {
@@ -302,10 +295,6 @@ where
         &self.ast_validation
     }
 
-    pub(crate) fn serialisation_format(&self) -> &SerialisationFormat {
-        &self.serialisation_format
-    }
-
     pub(crate) fn mod_name(&self) -> &str {
         &self.mod_name
     }
@@ -395,10 +384,6 @@ where
 
     pub(crate) fn stable(&self) -> &StateTable<LexerTypesT::StorageT> {
         &self.stable
-    }
-
-    pub(crate) fn sgraph(&self) -> &StateGraph<LexerTypesT::StorageT> {
-        &self.sgraph
     }
 
     pub(crate) fn take_parser(
