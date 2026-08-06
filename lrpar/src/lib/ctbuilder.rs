@@ -840,23 +840,7 @@ where
             inspector_rt(src_env.header_mut(), rt, &rule_ids, grmp)?
         }
 
-        let unused_keys = src_env.header().unused();
-        if !unused_keys.is_empty() {
-            return Err(format!("Unused keys in header: {}", unused_keys.join(", ")).into());
-        }
-        let missing_keys = src_env
-            .header()
-            .missing()
-            .iter()
-            .map(|s| s.as_str())
-            .collect::<Vec<_>>();
-        if !missing_keys.is_empty() {
-            return Err(format!(
-                "Required values were missing from the header: {}",
-                missing_keys.join(", ")
-            )
-            .into());
-        }
+        src_env.check_unused_header_keys()?;
 
         self.output_file(
             grm,
