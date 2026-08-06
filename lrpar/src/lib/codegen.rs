@@ -309,6 +309,10 @@ where
         &self.mod_name
     }
 
+    pub(crate) fn visibility(&self) -> &Visibility {
+        &self.cache_args.visibility
+    }
+
     pub(crate) fn code_generator(
         &self,
         src_env: &ParserSrcEnv,

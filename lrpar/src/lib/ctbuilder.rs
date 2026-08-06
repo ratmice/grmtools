@@ -887,7 +887,7 @@ where
     ) -> Result<(), Box<dyn Error>> {
         let grm = code_gen.grm();
         let mod_name = build_env.mod_name();
-        let visibility = self.visibility.clone();
+        let visibility = build_env.visibility();
         let user_actions = if let YaccKind::Original(YaccOriginalActionKind::UserAction)
         | YaccKind::Grmtools = build_env.ast_validation().yacc_kind()
         {
