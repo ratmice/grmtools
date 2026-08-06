@@ -409,7 +409,6 @@ where
         src_env: &ParserSrcEnv,
         build_env: &ParserBuildEnv<LexerTypesT>,
     ) -> Result<String, Box<dyn Error>> {
-        let grm = self.grm();
         let mod_name = build_env.mod_name();
         let visibility = build_env.visibility();
         let user_actions = if let YaccKind::Original(YaccOriginalActionKind::UserAction)
@@ -419,8 +418,8 @@ where
         } else {
             None
         };
-        let rule_consts = self.gen_rule_consts(grm)?;
-        let token_epp = self.gen_token_epp(grm)?;
+        let rule_consts = self.gen_rule_consts()?;
+        let token_epp = self.gen_token_epp()?;
         let parse_function = self.gen_parse_function(build_env)?;
         let action_wrappers = match build_env.ast_validation().yacc_kind() {
             YaccKind::Original(YaccOriginalActionKind::UserAction) | YaccKind::Grmtools => {
@@ -699,8 +698,8 @@ where
 
     fn gen_rule_consts(
         &self,
-        grm: &YaccGrammar<LexerTypesT::StorageT>,
     ) -> Result<TokenStream, proc_macro2::LexError> {
+        let grm = self.grm();
         let mut toks = TokenStream::new();
         for ridx in grm.iter_rules() {
             if !grm.rule_to_prods(ridx).contains(&grm.start_prod()) {
@@ -718,11 +717,10 @@ where
 
     fn gen_token_epp(
         &self,
-        grm: &YaccGrammar<LexerTypesT::StorageT>,
     ) -> Result<TokenStream, proc_macro2::LexError> {
         let mut tidxs = Vec::new();
-        for tidx in grm.iter_tidxs() {
-            tidxs.push(QuoteOption(grm.token_epp(tidx)));
+        for tidx in self.grm.iter_tidxs() {
+            tidxs.push(QuoteOption(self.grm.token_epp(tidx)));
         }
         let const_epp_ident = format_ident!("{}EPP", GLOBAL_PREFIX);
         let storage_ty = str::parse::<TokenStream>(type_name::<LexerTypesT::StorageT>())?;
