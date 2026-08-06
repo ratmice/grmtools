@@ -893,9 +893,7 @@ where
         src_env: &ParserSrcEnv,
     ) -> Result<(), Box<dyn Error>> {
         let visibility = self.visibility.clone();
-        let user_actions = if let Some(
-            YaccKind::Original(YaccOriginalActionKind::UserAction) | YaccKind::Grmtools,
-        ) = self.yacckind
+        let user_actions = if let YaccKind::Original(YaccOriginalActionKind::UserAction) | YaccKind::Grmtools = build_env.ast_validation().yacc_kind()
         {
             Some(code_gen.gen_user_actions(src_env)?)
         } else {
