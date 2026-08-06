@@ -290,6 +290,10 @@ where
         &self.serialisation_format
     }
 
+    pub(crate) fn mod_name(&self) -> &str {
+        &self.mod_name
+    }
+
     pub(crate) fn code_generator(
         &self,
         src_env: &ParserSrcEnv,

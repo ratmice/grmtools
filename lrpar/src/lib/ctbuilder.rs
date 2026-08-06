@@ -785,26 +785,7 @@ where
             .map(|(&n, &i)| (n.to_owned(), i.as_storaget()))
             .collect::<HashMap<_, _>>();
 
-        let derived_mod_name = match self.mod_name {
-            Some(s) => s.to_owned(),
-            None => {
-                // The user hasn't specified a module name, so we create one automatically: what we
-                // do is strip off all the filename extensions (note that it's likely that inp ends
-                // with `y.rs`, so we potentially have to strip off more than one extension) and
-                // then add `_y` to the end.
-                let mut stem = grmp.to_str().unwrap();
-                loop {
-                    let new_stem = Path::new(stem).file_stem().unwrap().to_str().unwrap();
-                    if stem == new_stem {
-                        break;
-                    }
-                    stem = new_stem;
-                }
-                format!("{}_y", stem)
-            }
-        };
-
-        let cache = self.rebuild_cache(&derived_mod_name, grm);
+        let cache = self.rebuild_cache(build_env.mod_name(), grm);
 
         // We don't need to go through the full rigmarole of generating an output file if all of
         // the following are true: the output file exists; it is newer than the input file; and the
@@ -880,7 +861,7 @@ where
         self.output_file(
             grm,
             stable,
-            &derived_mod_name,
+            build_env.mod_name(),
             outp,
             &format!("/* CACHE INFORMATION {} */\n", cache),
             src_env.yacc_diag(),
