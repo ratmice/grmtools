@@ -16,7 +16,7 @@ use std::{
 
 use crate::{
     LexerTypes, RTParserBuilder, RecoveryKind,
-    codegen::{ParserBuildEnv, ParserBuildEnvArgs, ParserSrcEnv},
+    codegen::{ParserBuildEnv, ParserBuildEnvArgs, ParserCodegen, ParserSrcEnv},
     diagnostics::{DiagnosticFormatter, SpannedDiagnosticFormatter},
 };
 
@@ -785,7 +785,7 @@ where
             .map(|(&n, &i)| (n.to_owned(), i.as_storaget()))
             .collect::<HashMap<_, _>>();
 
-        let cache = self.rebuild_cache(build_env.derived_mod_name(), grm);
+        let cache = self.rebuild_cache(&code_gen, &src_env, &build_env);
 
         // We don't need to go through the full rigmarole of generating an output file if all of
         // the following are true: the output file exists; it is newer than the input file; and the
@@ -1062,42 +1062,19 @@ where
 
     /// Generate the cache, which determines if anything's changed enough that we need to
     /// regenerate outputs and force rustc to recompile.
-    fn rebuild_cache(&self, derived_mod_name: &'_ str, grm: &YaccGrammar<StorageT>) -> TokenStream {
-        // We don't need to be particularly clever here: we just need to record the various things
-        // that could change between builds.
-        //
-        // Record the time that this version of lrpar was built. If the source code changes and
-        // rustc forces a recompile, this will change this value, causing anything which depends on
-        // this build of lrpar to be recompiled too.
-        let Self {
-            // All variables except for `output_path`, `inspect_callback` and `phantom` should
-            // be written into the cache.
-            grammar_path,
-            // I struggle to imagine the correct thing for `grammar_src`.
-            grammar_src: _,
-            // I struggle to imagine the correct thing for `from_ast`.
-            from_ast: _,
-            mod_name,
-            recoverer,
-            yacckind,
-            output_path: _,
-            error_on_conflicts,
-            warnings_are_errors,
-            show_warnings,
-            visibility,
-            rust_edition,
-            serialisation_format,
-            inspect_rt: _,
-            #[cfg(test)]
-                inspect_callback: _,
-            phantom: _,
-        } = self;
+    fn rebuild_cache(
+        &self,
+        code_gen: &ParserCodegen<LexerTypesT>,
+        src_env: &ParserSrcEnv,
+        build_env: &ParserBuildEnv<LexerTypesT>,
+    ) -> TokenStream {
+        let grm = code_gen.grm();
         let build_time = env!("VERGEN_BUILD_TIMESTAMP");
-        let grammar_path = grammar_path.as_ref().unwrap().to_string_lossy();
-        let mod_name = QuoteOption(mod_name.as_deref());
-        let visibility = visibility.to_variant_tokens();
-        let rust_edition = rust_edition.to_variant_tokens();
-        let yacckind = yacckind.expect("is_some() by this point");
+        let grammar_path = src_env.path().to_string_lossy();
+        let mod_name = QuoteOption(build_env.specified_mod_name());
+        let visibility = build_env.visibility().to_variant_tokens();
+        let rust_edition = build_env.rust_edition().to_variant_tokens();
+        let yacckind = build_env.yacc_kind();
         let rule_map = grm
             .iter_tidxs()
             .map(|tidx| {
@@ -1107,6 +1084,12 @@ where
                 ))
             })
             .collect::<Vec<_>>();
+        let derived_mod_name = build_env.derived_mod_name();
+        let serialisation_format = build_env.serialisation_format();
+        let recoverer = build_env.recoverer();
+        let error_on_conflicts = build_env.error_on_conflicts();
+        let show_warnings = build_env.show_warnings();
+        let warnings_are_errors = build_env.warnings_are_errors();
         let cache_info = quote! {
             BUILD_TIME = #build_time
             DERIVED_MOD_NAME = #derived_mod_name
@@ -1121,7 +1104,6 @@ where
             RUST_EDITION = #rust_edition
             RULE_IDS_MAP = [#(#rule_map,)*]
             VISIBILITY = #visibility
-
         };
         let cache_info_str = cache_info.to_string();
         quote!(#cache_info_str)

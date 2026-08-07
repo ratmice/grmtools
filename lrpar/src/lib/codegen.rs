@@ -125,6 +125,10 @@ impl<'a> ParserSrcEnv<'a> {
         }
     }
 
+    pub(crate) fn path(&self) -> &Path {
+        self.path
+    }
+
     pub(crate) fn yacc_diag(&self) -> &SpannedDiagnosticFormatter<'a> {
         &self.diagnostics
     }
@@ -302,6 +306,10 @@ where
 
     pub(crate) fn derived_mod_name(&self) -> &str {
         &self.mod_name
+    }
+
+    pub(crate) fn specified_mod_name(&self) -> Option<&str> {
+        self.cache_args.mod_name.as_deref()
     }
 
     pub(crate) fn recoverer(&self) -> RecoveryKind {
