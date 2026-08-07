@@ -16,7 +16,7 @@ use std::{
 
 use crate::{
     LexerTypes, RTParserBuilder, RecoveryKind,
-    codegen::{ParserBuildEnv, ParserBuildEnvArgs, ParserCodegen, ParserSrcEnv},
+    codegen::{ParserBuildEnv, ParserBuildEnvArgs, ParserSrcEnv, QuoteOption},
     diagnostics::{DiagnosticFormatter, SpannedDiagnosticFormatter},
 };
 
@@ -59,22 +59,6 @@ pub(crate) struct CTConflictsError<StorageT: Eq + Hash> {
     pub(crate) phantom: PhantomData<StorageT>,
 }
 
-/// The quote impl of `ToTokens` for `Option` prints an empty string for `None`
-/// and the inner value for `Some(inner_value)`.
-///
-/// This wrapper instead emits both `Some` and `None` variants.
-/// See: [quote #20](https://github.com/dtolnay/quote/issues/20)
-struct QuoteOption<T>(Option<T>);
-
-impl<T: ToTokens> ToTokens for QuoteOption<T> {
-    fn to_tokens(&self, tokens: &mut TokenStream) {
-        tokens.append_all(match self.0 {
-            Some(ref t) => quote! { ::std::option::Option::Some(#t) },
-            None => quote! { ::std::option::Option::None },
-        });
-    }
-}
-
 /// The quote impl of `ToTokens` for `usize` prints literal values
 /// including a type suffix for example `0usize`.
 ///
@@ -84,27 +68,6 @@ struct UnsuffixedUsize(usize);
 impl ToTokens for UnsuffixedUsize {
     fn to_tokens(&self, tokens: &mut TokenStream) {
         tokens.append(Literal::usize_unsuffixed(self.0))
-    }
-}
-
-/// This wrapper adds a missing impl of `ToTokens` for tuples.
-/// For a tuple `(a, b)` emits `(a.to_tokens(), b.to_tokens())`
-struct QuoteTuple<T>(T);
-
-impl<A: ToTokens, B: ToTokens> ToTokens for QuoteTuple<(A, B)> {
-    fn to_tokens(&self, tokens: &mut TokenStream) {
-        let (a, b) = &self.0;
-        tokens.append_all(quote!((#a, #b)));
-    }
-}
-
-/// The wrapped `&str` value will be emitted with a call to `to_string()`
-struct QuoteToString<'a>(&'a str);
-
-impl ToTokens for QuoteToString<'_> {
-    fn to_tokens(&self, tokens: &mut TokenStream) {
-        let x = &self.0;
-        tokens.append_all(quote! { #x.to_string() });
     }
 }
 
@@ -178,48 +141,6 @@ pub enum RustEdition {
     Rust2015,
     Rust2018,
     Rust2021,
-}
-
-impl RustEdition {
-    fn to_variant_tokens(self) -> TokenStream {
-        match self {
-            RustEdition::Rust2015 => quote!(::lrpar::RustEdition::Rust2015),
-            RustEdition::Rust2018 => quote!(::lrpar::RustEdition::Rust2018),
-            RustEdition::Rust2021 => quote!(::lrpar::RustEdition::Rust2021),
-        }
-    }
-}
-
-impl ToTokens for Visibility {
-    fn to_tokens(&self, tokens: &mut TokenStream) {
-        tokens.extend(match self {
-            Visibility::Private => quote!(),
-            Visibility::Public => quote! {pub},
-            Visibility::PublicSuper => quote! {pub(super)},
-            Visibility::PublicSelf => quote! {pub(self)},
-            Visibility::PublicCrate => quote! {pub(crate)},
-            Visibility::PublicIn(data) => {
-                let other = str::parse::<TokenStream>(data).unwrap();
-                quote! {pub(in #other)}
-            }
-        })
-    }
-}
-
-impl Visibility {
-    fn to_variant_tokens(&self) -> TokenStream {
-        match self {
-            Visibility::Private => quote!(::lrpar::Visibility::Private),
-            Visibility::Public => quote!(::lrpar::Visibility::Public),
-            Visibility::PublicSuper => quote!(::lrpar::Visibility::PublicSuper),
-            Visibility::PublicSelf => quote!(::lrpar::Visibility::PublicSelf),
-            Visibility::PublicCrate => quote!(::lrpar::Visibility::PublicCrate),
-            Visibility::PublicIn(data) => {
-                let data = QuoteToString(data);
-                quote!(::lrpar::Visibility::PublicIn(#data))
-            }
-        }
-    }
 }
 
 /// Sets the underlying encoding algorithm for serialising the `ParserData` into the generated source files.
@@ -785,7 +706,7 @@ where
             .map(|(&n, &i)| (n.to_owned(), i.as_storaget()))
             .collect::<HashMap<_, _>>();
 
-        let cache = self.rebuild_cache(&code_gen, &src_env, &build_env);
+        let cache = code_gen.cache_str(&src_env, &build_env);
 
         // We don't need to go through the full rigmarole of generating an output file if all of
         // the following are true: the output file exists; it is newer than the input file; and the
@@ -800,8 +721,7 @@ where
                 > FileTime::from_last_modification_time(inmd)
             && let Ok(outc) = read_to_string(outp)
         {
-
-            if outc.contains(&cache.to_string()) {
+            if outc.contains(&cache) {
                 let (grm, _, _) = code_gen.finish();
 
                 return Ok(CTParser {
@@ -1058,55 +978,6 @@ where
         f.write_all(outs.as_bytes())?;
         f.write_all(cache.as_bytes())?;
         Ok(())
-    }
-
-    /// Generate the cache, which determines if anything's changed enough that we need to
-    /// regenerate outputs and force rustc to recompile.
-    fn rebuild_cache(
-        &self,
-        code_gen: &ParserCodegen<LexerTypesT>,
-        src_env: &ParserSrcEnv,
-        build_env: &ParserBuildEnv<LexerTypesT>,
-    ) -> TokenStream {
-        let grm = code_gen.grm();
-        let build_time = env!("VERGEN_BUILD_TIMESTAMP");
-        let grammar_path = src_env.path().to_string_lossy();
-        let mod_name = QuoteOption(build_env.specified_mod_name());
-        let visibility = build_env.visibility().to_variant_tokens();
-        let rust_edition = build_env.rust_edition().to_variant_tokens();
-        let yacckind = build_env.yacc_kind();
-        let rule_map = grm
-            .iter_tidxs()
-            .map(|tidx| {
-                QuoteTuple((
-                    usize::from(tidx),
-                    grm.token_name(tidx).unwrap_or("<unknown>"),
-                ))
-            })
-            .collect::<Vec<_>>();
-        let derived_mod_name = build_env.derived_mod_name();
-        let serialisation_format = build_env.serialisation_format();
-        let recoverer = build_env.recoverer();
-        let error_on_conflicts = build_env.error_on_conflicts();
-        let show_warnings = build_env.show_warnings();
-        let warnings_are_errors = build_env.warnings_are_errors();
-        let cache_info = quote! {
-            BUILD_TIME = #build_time
-            DERIVED_MOD_NAME = #derived_mod_name
-            ENCODING_CONFIG = #serialisation_format
-            GRAMMAR_PATH = #grammar_path
-            MOD_NAME = #mod_name
-            RECOVERER = #recoverer
-            YACC_KIND = #yacckind
-            ERROR_ON_CONFLICTS = #error_on_conflicts
-            SHOW_WARNINGS = #show_warnings
-            WARNINGS_ARE_ERRORS = #warnings_are_errors
-            RUST_EDITION = #rust_edition
-            RULE_IDS_MAP = [#(#rule_map,)*]
-            VISIBILITY = #visibility
-        };
-        let cache_info_str = cache_info.to_string();
-        quote!(#cache_info_str)
     }
 
     /// Generate the main parse() function for the output file.

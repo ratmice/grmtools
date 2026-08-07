@@ -16,6 +16,8 @@ use cfgrammar::{
 };
 
 use lrtable::{Minimiser, StateGraph, StateTable, from_yacc};
+use proc_macro2::TokenStream;
+use quote::{ToTokens, TokenStreamExt, quote};
 use wincode::SchemaWrite;
 
 pub(crate) struct ParserSrcEnv<'a> {
@@ -436,6 +438,62 @@ where
     ) {
         (self.grm, self.sgraph, self.stable)
     }
+
+    /// Generate the cache, which determines if anything's changed enough that we need to
+    /// regenerate outputs and force rustc to recompile.
+    fn gen_cache(
+        &self,
+        src_env: &ParserSrcEnv,
+        build_env: &ParserBuildEnv<LexerTypesT>,
+    ) -> TokenStream {
+        let grm = self.grm();
+        let build_time = env!("VERGEN_BUILD_TIMESTAMP");
+        let grammar_path = src_env.path().to_string_lossy();
+        let mod_name = QuoteOption(build_env.specified_mod_name());
+        let visibility = build_env.visibility().to_variant_tokens();
+        let rust_edition = build_env.rust_edition().to_variant_tokens();
+        let yacckind = build_env.yacc_kind();
+        let rule_map = grm
+            .iter_tidxs()
+            .map(|tidx| {
+                QuoteTuple((
+                    usize::from(tidx),
+                    grm.token_name(tidx).unwrap_or("<unknown>"),
+                ))
+            })
+            .collect::<Vec<_>>();
+        let derived_mod_name = build_env.derived_mod_name();
+        let serialisation_format = build_env.serialisation_format();
+        let recoverer = build_env.recoverer();
+        let error_on_conflicts = build_env.error_on_conflicts();
+        let show_warnings = build_env.show_warnings();
+        let warnings_are_errors = build_env.warnings_are_errors();
+        let cache_info = quote! {
+            BUILD_TIME = #build_time
+            DERIVED_MOD_NAME = #derived_mod_name
+            ENCODING_CONFIG = #serialisation_format
+            GRAMMAR_PATH = #grammar_path
+            MOD_NAME = #mod_name
+            RECOVERER = #recoverer
+            YACC_KIND = #yacckind
+            ERROR_ON_CONFLICTS = #error_on_conflicts
+            SHOW_WARNINGS = #show_warnings
+            WARNINGS_ARE_ERRORS = #warnings_are_errors
+            RUST_EDITION = #rust_edition
+            RULE_IDS_MAP = [#(#rule_map,)*]
+            VISIBILITY = #visibility
+        };
+        let cache_info_str = cache_info.to_string();
+        quote!(#cache_info_str)
+    }
+
+    pub(crate) fn cache_str(
+        &self,
+        src_env: &ParserSrcEnv,
+        build_env: &ParserBuildEnv<LexerTypesT>,
+    ) -> String {
+        self.gen_cache(src_env, build_env).to_string()
+    }
 }
 
 /// A string which uses `Display` for it's `Debug` impl.
@@ -453,3 +511,83 @@ impl fmt::Debug for ErrorString {
     }
 }
 impl Error for ErrorString {}
+
+/// The quote impl of `ToTokens` for `Option` prints an empty string for `None`
+/// and the inner value for `Some(inner_value)`.
+///
+/// This wrapper instead emits both `Some` and `None` variants.
+/// See: [quote #20](https://github.com/dtolnay/quote/issues/20)
+// Temporarily pub(crate)
+pub(crate) struct QuoteOption<T>(pub(crate) Option<T>);
+
+impl<T: ToTokens> ToTokens for QuoteOption<T> {
+    fn to_tokens(&self, tokens: &mut TokenStream) {
+        tokens.append_all(match self.0 {
+            Some(ref t) => quote! { ::std::option::Option::Some(#t) },
+            None => quote! { ::std::option::Option::None },
+        });
+    }
+}
+
+/// This wrapper adds a missing impl of `ToTokens` for tuples.
+/// For a tuple `(a, b)` emits `(a.to_tokens(), b.to_tokens())`
+struct QuoteTuple<T>(T);
+
+impl<A: ToTokens, B: ToTokens> ToTokens for QuoteTuple<(A, B)> {
+    fn to_tokens(&self, tokens: &mut TokenStream) {
+        let (a, b) = &self.0;
+        tokens.append_all(quote!((#a, #b)));
+    }
+}
+
+/// The wrapped `&str` value will be emitted with a call to `to_string()`
+struct QuoteToString<'a>(&'a str);
+
+impl ToTokens for QuoteToString<'_> {
+    fn to_tokens(&self, tokens: &mut TokenStream) {
+        let x = &self.0;
+        tokens.append_all(quote! { #x.to_string() });
+    }
+}
+
+impl RustEdition {
+    fn to_variant_tokens(self) -> TokenStream {
+        match self {
+            RustEdition::Rust2015 => quote!(::lrpar::RustEdition::Rust2015),
+            RustEdition::Rust2018 => quote!(::lrpar::RustEdition::Rust2018),
+            RustEdition::Rust2021 => quote!(::lrpar::RustEdition::Rust2021),
+        }
+    }
+}
+
+impl ToTokens for Visibility {
+    fn to_tokens(&self, tokens: &mut TokenStream) {
+        tokens.extend(match self {
+            Visibility::Private => quote!(),
+            Visibility::Public => quote! {pub},
+            Visibility::PublicSuper => quote! {pub(super)},
+            Visibility::PublicSelf => quote! {pub(self)},
+            Visibility::PublicCrate => quote! {pub(crate)},
+            Visibility::PublicIn(data) => {
+                let other = str::parse::<TokenStream>(data).unwrap();
+                quote! {pub(in #other)}
+            }
+        })
+    }
+}
+
+impl Visibility {
+    fn to_variant_tokens(&self) -> TokenStream {
+        match self {
+            Visibility::Private => quote!(::lrpar::Visibility::Private),
+            Visibility::Public => quote!(::lrpar::Visibility::Public),
+            Visibility::PublicSuper => quote!(::lrpar::Visibility::PublicSuper),
+            Visibility::PublicSelf => quote!(::lrpar::Visibility::PublicSelf),
+            Visibility::PublicCrate => quote!(::lrpar::Visibility::PublicCrate),
+            Visibility::PublicIn(data) => {
+                let data = QuoteToString(data);
+                quote!(::lrpar::Visibility::PublicIn(#data))
+            }
+        }
+    }
+}
