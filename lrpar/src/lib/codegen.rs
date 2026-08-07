@@ -587,10 +587,7 @@ where
     }
 
     /// Generate the user action functions (if any).
-    pub(crate) fn gen_user_actions(
-        &self,
-        src_env: &ParserSrcEnv,
-    ) -> Result<TokenStream, Box<dyn Error>> {
+    fn gen_user_actions(&self, src_env: &ParserSrcEnv) -> Result<TokenStream, Box<dyn Error>> {
         let grm = self.grm();
         let diag = src_env.yacc_diag();
         let programs = grm
@@ -756,7 +753,7 @@ where
         })
     }
 
-    pub(crate) fn gen_rule_consts(&self) -> Result<TokenStream, proc_macro2::LexError> {
+    fn gen_rule_consts(&self) -> Result<TokenStream, proc_macro2::LexError> {
         let grm = self.grm();
         let mut toks = TokenStream::new();
         for ridx in grm.iter_rules() {
@@ -773,7 +770,7 @@ where
         Ok(toks)
     }
 
-    pub(crate) fn gen_token_epp(&self) -> Result<TokenStream, proc_macro2::LexError> {
+    fn gen_token_epp(&self) -> Result<TokenStream, proc_macro2::LexError> {
         let grm = self.grm();
         let mut tidxs = Vec::new();
         for tidx in grm.iter_tidxs() {
@@ -796,7 +793,7 @@ where
     }
 
     /// Generate the main parse() function for the output file.
-    pub(crate) fn gen_parse_function(
+    fn gen_parse_function(
         &self,
         build_env: &ParserBuildEnv<LexerTypesT>,
     ) -> Result<TokenStream, Box<dyn Error>> {
@@ -974,7 +971,7 @@ where
     }
 
     /// Generate the wrappers that call user actions
-    pub(crate) fn gen_wrappers(
+    fn gen_wrappers(
         &self,
         build_env: &ParserBuildEnv<LexerTypesT>,
     ) -> Result<TokenStream, Box<dyn Error>> {
