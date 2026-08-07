@@ -12,7 +12,7 @@ use std::{
 
 use crate::{
     LexerTypes, RecoveryKind, RustEdition, SerialisationFormat, Visibility,
-    ctbuilder::{CTConflictsError, ERROR, FixIntConfig, VarIntConfig, indent, make_generics},
+    ctbuilder::{CTConflictsError, ERROR, FixIntConfig, VarIntConfig, indent},
     diagnostics::{DiagnosticFormatter, SpannedDiagnosticFormatter},
 };
 
@@ -25,7 +25,7 @@ use cfgrammar::{
 use lrtable::{Minimiser, StateGraph, StateTable, from_yacc};
 use proc_macro2::{Literal, TokenStream};
 use quote::{ToTokens, TokenStreamExt, format_ident, quote};
-use syn::Generics;
+use syn::{Generics, parse_quote};
 use wincode::SchemaWrite;
 
 const ACTION_PREFIX: &str = "__gt_";
@@ -1253,5 +1253,30 @@ impl Visibility {
                 quote!(::lrpar::Visibility::PublicIn(#data))
             }
         }
+    }
+}
+
+impl ToTokens for SerialisationFormat {
+    fn to_tokens(&self, tokens: &mut TokenStream) {
+        tokens.extend(match self {
+            SerialisationFormat::FixedSizeInteger => {
+                quote! {::lrpar::ctbuilder::SerialisationFormat::FixedSizeInteger}
+            }
+            SerialisationFormat::VariableSizedInteger => {
+                quote! {::lrpar::ctbuilder::SerialisationFormat::VariableSizedInteger}
+            }
+        })
+    }
+}
+
+pub(crate) fn make_generics(parse_generics: Option<&str>) -> Result<Generics, Box<dyn Error>> {
+    if let Some(parse_generics) = parse_generics {
+        let tokens = str::parse::<TokenStream>(parse_generics)?;
+        match syn::parse2(quote!(<'lexer, 'input: 'lexer, #tokens>)) {
+            Ok(res) => Ok(res),
+            Err(err) => Err(format!("unable to parse %parse-generics: {}", err).into()),
+        }
+    } else {
+        Ok(parse_quote!(<'lexer, 'input: 'lexer>))
     }
 }

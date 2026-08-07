@@ -31,9 +31,6 @@ use cfgrammar::{
 use filetime::FileTime;
 use lrtable::{StateGraph, StateTable, statetable::Conflicts};
 use num_traits::{AsPrimitive, PrimInt, Unsigned};
-use proc_macro2::TokenStream;
-use quote::{ToTokens, quote};
-use syn::{Generics, parse_quote};
 use wincode::{SchemaRead, SchemaReadOwned, SchemaWrite};
 
 const RUST_FILE_EXT: &str = "rs";
@@ -213,18 +210,6 @@ impl<T: Clone + Debug> TryFrom<&Value<T>> for SerialisationFormat {
 // We export this for generated code to refer to.
 #[doc(hidden)]
 pub use wincode;
-impl ToTokens for SerialisationFormat {
-    fn to_tokens(&self, tokens: &mut TokenStream) {
-        tokens.extend(match self {
-            SerialisationFormat::FixedSizeInteger => {
-                quote! {::lrpar::ctbuilder::SerialisationFormat::FixedSizeInteger}
-            }
-            SerialisationFormat::VariableSizedInteger => {
-                quote! {::lrpar::ctbuilder::SerialisationFormat::VariableSizedInteger}
-            }
-        })
-    }
-}
 
 /// A `CTParserBuilder` allows one to specify the criteria for building a statically generated
 /// parser.
@@ -1002,18 +987,6 @@ where
 /// 4. Replace all `\n{indent}\n` with `\n\n`
 pub(crate) fn indent(indent: &str, s: &str) -> String {
     format!("{indent}{}\n", s.trim_end_matches('\n')).replace('\n', &format!("\n{}", indent))
-}
-
-pub(crate) fn make_generics(parse_generics: Option<&str>) -> Result<Generics, Box<dyn Error>> {
-    if let Some(parse_generics) = parse_generics {
-        let tokens = str::parse::<TokenStream>(parse_generics)?;
-        match syn::parse2(quote!(<'lexer, 'input: 'lexer, #tokens>)) {
-            Ok(res) => Ok(res),
-            Err(err) => Err(format!("unable to parse %parse-generics: {}", err).into()),
-        }
-    } else {
-        Ok(parse_quote!(<'lexer, 'input: 'lexer>))
-    }
 }
 
 // Tests dealing with the filesystem not supported under wasm32
