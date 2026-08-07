@@ -453,6 +453,83 @@ where
         (self.grm, self.sgraph, self.stable)
     }
 
+    pub(crate) fn generate(
+        &self,
+        src_env: &ParserSrcEnv,
+        build_env: &ParserBuildEnv<LexerTypesT>,
+    ) -> Result<String, Box<dyn Error>> {
+        let mod_name = build_env.derived_mod_name();
+        let visibility = build_env.visibility();
+        let user_actions = if let YaccKind::Original(YaccOriginalActionKind::UserAction)
+        | YaccKind::Grmtools = build_env.yacc_kind()
+        {
+            Some(self.gen_user_actions(src_env)?)
+        } else {
+            None
+        };
+        let rule_consts = self.gen_rule_consts()?;
+        let token_epp = self.gen_token_epp()?;
+        let parse_function = self.gen_parse_function(build_env)?;
+        let action_wrappers = match build_env.yacc_kind() {
+            YaccKind::Original(YaccOriginalActionKind::UserAction) | YaccKind::Grmtools => {
+                Some(self.gen_wrappers(build_env)?)
+            }
+            YaccKind::Original(YaccOriginalActionKind::NoAction)
+            | YaccKind::Original(YaccOriginalActionKind::GenericParseTree) => None,
+            _ => unreachable!(),
+        };
+
+        let additional_decls = if let YaccKind::Original(YaccOriginalActionKind::GenericParseTree) =
+            build_env.yacc_kind()
+        {
+            // `lrpar::Node`` is deprecated within the lrpar crate, but not from within this module,
+            // Once it is removed from `lrpar`, we should move the declaration here entirely.
+            Some(quote! {
+                #[allow(unused_imports)]
+                pub use ::lrpar::parser::_deprecated_moved_::Node;
+            })
+        } else {
+            None
+        };
+
+        let mod_name =
+            match syn::parse_str::<proc_macro2::Ident>(mod_name) {
+                Ok(s) => s,
+                Err(e) => return Err(format!(
+                    "CTParserBuilder::mod_name(\"{}\") is not a valid rust identifier due to '{}'",
+                    mod_name, e
+                )
+                .into()),
+            };
+        let out_tokens = quote! {
+            #visibility mod #mod_name {
+                // At the top so that `user_actions` may contain #![inner_attribute]
+                #user_actions
+                mod _parser_ {
+                    #![allow(clippy::type_complexity)]
+                    #![allow(clippy::unnecessary_wraps)]
+                    #![deny(unsafe_code)]
+                    #[allow(unused_imports)]
+                    use super::*;
+                    #additional_decls
+                    #parse_function
+                    #rule_consts
+                    #token_epp
+                    #action_wrappers
+                } // End of `mod _parser_`
+                #[allow(unused_imports)]
+                pub use _parser_::*;
+                #[allow(unused_imports)]
+                use ::lrpar::Lexeme;
+            } // End of `mod #mod_name`
+        };
+        // Try and run a code formatter on the generated code.
+        let unformatted = out_tokens.to_string();
+        Ok(syn::parse_str(&unformatted)
+            .map(|syntax_tree| prettyplease::unparse(&syntax_tree))
+            .unwrap_or(unformatted))
+    }
+
     /// Generate the cache, which determines if anything's changed enough that we need to
     /// regenerate outputs and force rustc to recompile.
     fn gen_cache(
