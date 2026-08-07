@@ -24,7 +24,7 @@ use crate::{
 use crate::unstable_api::UnstableApi;
 
 use cfgrammar::{
-    Location, RIdx, Symbol,
+    Location, Symbol,
     header::{Header, HeaderError, HeaderErrorKind, HeaderValue, Namespaced, Setting, Value},
     markmap::{Entry, MergeBehavior},
     yacc::{YaccGrammar, YaccKind, YaccOriginalActionKind, ast::ASTWithValidityInfo},
@@ -39,9 +39,9 @@ use wincode::{SchemaRead, SchemaReadOwned, SchemaWrite};
 
 pub(crate) const ACTION_PREFIX: &str = "__gt_";
 pub(crate) const GLOBAL_PREFIX: &str = "__GT_";
-const ACTIONS_KIND: &str = "__GtActionsKind";
-const ACTIONS_KIND_PREFIX: &str = "Ak";
-const ACTIONS_KIND_HIDDEN: &str = "__GtActionsKindHidden";
+pub(crate) const ACTIONS_KIND: &str = "__GtActionsKind";
+pub(crate) const ACTIONS_KIND_PREFIX: &str = "Ak";
+pub(crate) const ACTIONS_KIND_HIDDEN: &str = "__GtActionsKindHidden";
 
 const RUST_FILE_EXT: &str = "rs";
 
@@ -899,8 +899,8 @@ where
 
         let rule_consts = code_gen.gen_rule_consts()?;
         let token_epp = code_gen.gen_token_epp()?;
-        let parse_function = self.gen_parse_function(code_gen, build_env)?;
-        let action_wrappers = match build_env.yacc_kind() {
+        let parse_function = code_gen.gen_parse_function(build_env)?;
+        let action_wrappers = match  build_env.yacc_kind()  {
             YaccKind::Original(YaccOriginalActionKind::UserAction) | YaccKind::Grmtools => {
                 Some(self.gen_wrappers(code_gen, build_env)?)
             }
@@ -962,185 +962,6 @@ where
         f.write_all(outs.as_bytes())?;
         f.write_all(cache.as_bytes())?;
         Ok(())
-    }
-
-    /// Generate the main parse() function for the output file.
-    fn gen_parse_function(
-        &self,
-        code_gen: &ParserCodegen<LexerTypesT>,
-        build_env: &ParserBuildEnv<LexerTypesT>,
-    ) -> Result<TokenStream, Box<dyn Error>> {
-        let stable = code_gen.stable();
-        let grm = code_gen.grm();
-        let storaget = str::parse::<TokenStream>(type_name::<LexerTypesT::StorageT>())?;
-        let lexertypest = str::parse::<TokenStream>(type_name::<LexerTypesT>())?;
-        let recoverer = build_env.recoverer();
-        let run_parser = match build_env.yacc_kind() {
-            YaccKind::Original(YaccOriginalActionKind::GenericParseTree) => {
-                quote! {
-                    ::lrpar::RTParserBuilder::new(grm, stable)
-                        .recoverer(#recoverer)
-                        .parse_map(
-                            lexer,
-                            &|lexeme| Node::Term{lexeme},
-                            &|ridx, nodes| Node::Nonterm{ridx, nodes}
-                        )
-                }
-            }
-            YaccKind::Original(YaccOriginalActionKind::NoAction) => {
-                quote! {
-                    ::lrpar::RTParserBuilder::new(grm, stable)
-                        .recoverer(#recoverer)
-                        .parse_map(lexer, &|_| (), &|_, _| ()).1
-                }
-            }
-            YaccKind::Original(YaccOriginalActionKind::UserAction) | YaccKind::Grmtools => {
-                let actionskind = str::parse::<TokenStream>(ACTIONS_KIND)?;
-                let parsed_parse_generics = make_generics(grm.parse_generics().as_deref())?;
-                let (_, type_generics, _) = parsed_parse_generics.split_for_impl();
-                // actions always have a parse_param argument, and when the `parse` function lacks one
-                // that parameter will be unit.
-                let (action_fn_parse_param, action_fn_parse_param_ty) = match grm.parse_param() {
-                    Some((name, ty)) => {
-                        let name = str::parse::<TokenStream>(name)?;
-                        let ty = str::parse::<TokenStream>(ty)?;
-                        (quote!(#name), quote!(#ty))
-                    }
-                    None => (quote!(()), quote!(())),
-                };
-                let wrappers = grm.iter_pidxs().map(|pidx| {
-                    let pidx = usize::from(pidx);
-                    format_ident!("{}wrapper_{}", ACTION_PREFIX, pidx)
-                });
-                let edition_lifetime = if build_env.rust_edition() != RustEdition::Rust2015 {
-                    quote!('_,)
-                } else {
-                    quote!()
-                };
-                let ridx = usize::from(self.user_start_ridx(code_gen));
-                let action_ident = format_ident!("{}{}", ACTIONS_KIND_PREFIX, ridx);
-
-                quote! {
-                    let actions: ::std::vec::Vec<
-                            &dyn Fn(
-                                    ::cfgrammar::RIdx<#storaget>,
-                                    &'lexer dyn ::lrpar::NonStreamingLexer<'input, #lexertypest>,
-                                    ::cfgrammar::Span,
-                                    ::std::vec::Drain<#edition_lifetime ::lrpar::parser::AStackType<<#lexertypest as ::lrpar::LexerTypes>::LexemeT, #actionskind #type_generics>>,
-                                    #action_fn_parse_param_ty
-                            ) -> #actionskind #type_generics
-                        > = ::std::vec![#(&#wrappers,)*];
-                    match ::lrpar::RTParserBuilder::new(grm, stable)
-                        .recoverer(#recoverer)
-                        .parse_actions(lexer, &actions, #action_fn_parse_param) {
-                            (Some(#actionskind::#action_ident(x)), y) => (Some(x), y),
-                            (None, y) => (None, y),
-                            _ => unreachable!()
-                    }
-                }
-            }
-            kind => panic!("YaccKind {:?} not supported", kind),
-        };
-
-        let parsed_parse_generics: Generics = match build_env.yacc_kind() {
-            YaccKind::Original(YaccOriginalActionKind::UserAction) | YaccKind::Grmtools => {
-                make_generics(grm.parse_generics().as_deref())?
-            }
-            _ => make_generics(None)?,
-        };
-        let (generics, _, where_clause) = parsed_parse_generics.split_for_impl();
-
-        // `parse()` may or may not have an argument for `%parseparam`.
-        let parse_fn_parse_param = match build_env.yacc_kind() {
-            YaccKind::Original(YaccOriginalActionKind::UserAction) | YaccKind::Grmtools => {
-                if let Some((name, tyname)) = grm.parse_param() {
-                    let name = str::parse::<TokenStream>(name)?;
-                    let tyname = str::parse::<TokenStream>(tyname)?;
-                    Some(quote! {#name: #tyname})
-                } else {
-                    None
-                }
-            }
-            _ => None,
-        };
-        let parse_fn_return_ty = match build_env.yacc_kind() {
-            YaccKind::Original(YaccOriginalActionKind::UserAction) | YaccKind::Grmtools => {
-                let actiont = grm
-                    .actiontype(self.user_start_ridx(code_gen))
-                    .as_ref()
-                    .map(|at| str::parse::<TokenStream>(at))
-                    .transpose()?;
-                quote! {
-                    (::std::option::Option<#actiont>, ::std::vec::Vec<::lrpar::LexParseError<#storaget, #lexertypest>>)
-                }
-            }
-            YaccKind::Original(YaccOriginalActionKind::GenericParseTree) => quote! {
-                (::std::option::Option<Node<<#lexertypest as ::lrpar::LexerTypes>::LexemeT, #storaget>>,
-                    ::std::vec::Vec<::lrpar::LexParseError<#storaget, #lexertypest>>)
-            },
-            YaccKind::Original(YaccOriginalActionKind::NoAction) => quote! {
-                ::std::vec::Vec<::lrpar::LexParseError<#storaget, #lexertypest>>
-            },
-            _ => unreachable!(),
-        };
-
-        let serialisation_format = build_env.serialisation_format();
-        // Note that the configuration types use associated consts, and thus these configurations represent distinct types.
-        let (grm_data, stable_data): (Vec<u8>, Vec<u8>) = match serialisation_format {
-            SerialisationFormat::FixedSizeInteger => {
-                let config = wincode::config::Configuration::default().with_fixint_encoding();
-                let grm = wincode::config::serialize(grm, config)?;
-                let stable = wincode::config::serialize(stable, config)?;
-                (grm, stable)
-            }
-            SerialisationFormat::VariableSizedInteger => {
-                let config = wincode::config::Configuration::default().with_varint_encoding();
-                let grm = wincode::config::serialize(grm, config)?;
-                let stable = wincode::config::serialize(stable, config)?;
-                (grm, stable)
-            }
-        };
-        let serialisation_format_str = quote!(serialisation_format).to_string();
-        Ok(quote! {
-            const __GRM_DATA: &[u8] = &[#(#grm_data,)*];
-            const __STABLE_DATA: &[u8] = &[#(#stable_data,)*];
-            const __SERIALISATION_FORMAT: ::lrpar::ctbuilder::SerialisationFormat = #serialisation_format;
-
-            fn __lrpar_parser_data() -> &'static ::lrpar::ParserData<#storaget> {
-                static DATA: ::std::sync::OnceLock<::lrpar::ParserData<#storaget>>
-                    = ::std::sync::OnceLock::new();
-                DATA.get_or_init(
-                    || {
-                        // We have to call reconstitute like this because the config parameter takes a trait
-                        // which uses const generics. Thus the two config parameters here are not actually of the same type.
-                        match __SERIALISATION_FORMAT {
-                            ::lrpar::ctbuilder::SerialisationFormat::FixedSizeInteger => {
-                                ::lrpar::ctbuilder::_reconstitute(__GRM_DATA, __STABLE_DATA, ::lrpar::ctbuilder::wincode::config::Configuration::default().with_fixint_encoding())
-                            }
-                            ::lrpar::ctbuilder::SerialisationFormat::VariableSizedInteger => {
-                                ::lrpar::ctbuilder::_reconstitute(__GRM_DATA, __STABLE_DATA, ::lrpar::ctbuilder::wincode::config::Configuration::default().with_varint_encoding())
-                            }
-                            _ => {
-                                panic!("Parser source was generated using unknown `SerialisationFormat`: {:?}", #serialisation_format_str)
-                            }
-                        }
-                    }
-                )
-            }
-
-            #[allow(dead_code)]
-            pub fn parse #generics (
-                 lexer: &'lexer dyn ::lrpar::NonStreamingLexer<'input, #lexertypest>,
-                 #parse_fn_parse_param
-            ) -> #parse_fn_return_ty
-            #where_clause
-            {
-                let __data = __lrpar_parser_data();
-                let grm = __data.grm();
-                let stable = __data.stable();
-                #run_parser
-            }
-        })
     }
 
     /// Generate the wrappers that call user actions
@@ -1305,21 +1126,6 @@ where
             }
         });
         Ok(wrappers)
-    }
-
-    /// Return the `RIdx` of the %start rule in the grammar (which will not be the same as
-    /// grm.start_rule_idx because the latter has an additional rule insert by cfgrammar
-    /// which then calls the user's %start rule).
-    fn user_start_ridx(
-        &self,
-        code_gen: &ParserCodegen<LexerTypesT>,
-    ) -> RIdx<LexerTypesT::StorageT> {
-        let grm = code_gen.grm();
-        debug_assert_eq!(grm.prod(grm.start_prod()).len(), 1);
-        match grm.prod(grm.start_prod())[0] {
-            Symbol::Rule(ridx) => ridx,
-            _ => unreachable!(),
-        }
     }
 }
 
