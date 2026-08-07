@@ -13,7 +13,8 @@ use std::{
 use crate::{
     LexerTypes, RecoveryKind, RustEdition, SerialisationFormat, Visibility,
     ctbuilder::{
-        ACTION_PREFIX, CTConflictsError, ERROR, FixIntConfig, VarIntConfig, indent, make_generics,
+        ACTION_PREFIX, CTConflictsError, ERROR, FixIntConfig, GLOBAL_PREFIX, VarIntConfig, indent,
+        make_generics,
     },
     diagnostics::{DiagnosticFormatter, SpannedDiagnosticFormatter},
 };
@@ -690,6 +691,28 @@ where
         }
         Ok(toks)
     }
+
+    pub(crate) fn gen_token_epp(&self) -> Result<TokenStream, proc_macro2::LexError> {
+        let grm = self.grm();
+        let mut tidxs = Vec::new();
+        for tidx in grm.iter_tidxs() {
+            tidxs.push(QuoteOption(grm.token_epp(tidx)));
+        }
+        let const_epp_ident = format_ident!("{}EPP", GLOBAL_PREFIX);
+        let storage_ty = str::parse::<TokenStream>(type_name::<LexerTypesT::StorageT>())?;
+        Ok(quote! {
+            const #const_epp_ident: &[::std::option::Option<&str>] = &[
+                #(#tidxs,)*
+            ];
+
+            /// Return the %epp entry for token `tidx` (where `None` indicates \"the token has no
+            /// pretty-printed value\"). Panics if `tidx` doesn't exist.
+            #[allow(dead_code)]
+            pub fn token_epp<'a>(tidx: ::cfgrammar::TIdx<#storage_ty>) -> ::std::option::Option<&'a str> {
+                #const_epp_ident[usize::from(tidx)]
+            }
+        })
+    }
 }
 
 /// A string which uses `Display` for it's `Debug` impl.
@@ -713,8 +736,7 @@ impl Error for ErrorString {}
 ///
 /// This wrapper instead emits both `Some` and `None` variants.
 /// See: [quote #20](https://github.com/dtolnay/quote/issues/20)
-// Temporarily pub(crate)
-pub(crate) struct QuoteOption<T>(pub(crate) Option<T>);
+struct QuoteOption<T>(Option<T>);
 
 impl<T: ToTokens> ToTokens for QuoteOption<T> {
     fn to_tokens(&self, tokens: &mut TokenStream) {
