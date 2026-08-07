@@ -1,6 +1,3 @@
-#![deny(unfulfilled_lint_expectations)]
-#![expect(dead_code)]
-
 use std::{
     any::type_name,
     fmt::{self, Write},
@@ -296,14 +293,6 @@ where
             header,
             phantom: PhantomData,
         }
-    }
-
-    pub(crate) fn header_mut(&mut self) -> &mut Header<Location> {
-        &mut self.header
-    }
-
-    pub(crate) fn header(&self) -> &Header<Location> {
-        &self.header
     }
 
     fn merge_headers(&mut self) -> Result<(), ParserSrcEnvError> {
