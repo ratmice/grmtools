@@ -25,7 +25,7 @@ use cfgrammar::{
 };
 
 use lrtable::{Minimiser, StateGraph, StateTable, from_yacc};
-use proc_macro2::TokenStream;
+use proc_macro2::{Literal, TokenStream};
 use quote::{ToTokens, TokenStreamExt, format_ident, quote};
 use wincode::SchemaWrite;
 
@@ -673,6 +673,23 @@ where
             #action_fns
         })
     }
+
+    pub(crate) fn gen_rule_consts(&self) -> Result<TokenStream, proc_macro2::LexError> {
+        let grm = self.grm();
+        let mut toks = TokenStream::new();
+        for ridx in grm.iter_rules() {
+            if !grm.rule_to_prods(ridx).contains(&grm.start_prod()) {
+                let r_const = format_ident!("R_{}", grm.rule_name_str(ridx).to_ascii_uppercase());
+                let storage_ty = str::parse::<TokenStream>(type_name::<LexerTypesT::StorageT>())?;
+                let ridx = UnsuffixedUsize(usize::from(ridx));
+                toks.extend(quote! {
+                    #[allow(dead_code)]
+                    pub const #r_const: #storage_ty = #ridx;
+                });
+            }
+        }
+        Ok(toks)
+    }
 }
 
 /// A string which uses `Display` for it's `Debug` impl.
@@ -726,6 +743,18 @@ impl ToTokens for QuoteToString<'_> {
     fn to_tokens(&self, tokens: &mut TokenStream) {
         let x = &self.0;
         tokens.append_all(quote! { #x.to_string() });
+    }
+}
+
+/// The quote impl of `ToTokens` for `usize` prints literal values
+/// including a type suffix for example `0usize`.
+///
+/// This wrapper omits the type suffix emitting `0` instead.
+struct UnsuffixedUsize(usize);
+
+impl ToTokens for UnsuffixedUsize {
+    fn to_tokens(&self, tokens: &mut TokenStream) {
+        tokens.append(Literal::usize_unsuffixed(self.0))
     }
 }
 

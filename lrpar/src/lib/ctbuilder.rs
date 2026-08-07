@@ -32,8 +32,8 @@ use cfgrammar::{
 use filetime::FileTime;
 use lrtable::{StateGraph, StateTable, statetable::Conflicts};
 use num_traits::{AsPrimitive, PrimInt, Unsigned};
-use proc_macro2::{Literal, TokenStream};
-use quote::{ToTokens, TokenStreamExt, format_ident, quote};
+use proc_macro2::TokenStream;
+use quote::{ToTokens, format_ident, quote};
 use syn::{Generics, parse_quote};
 use wincode::{SchemaRead, SchemaReadOwned, SchemaWrite};
 
@@ -57,18 +57,6 @@ pub(crate) struct CTConflictsError<StorageT: Eq + Hash> {
     #[cfg_attr(test, allow(dead_code))]
     pub(crate) stable: StateTable<StorageT>,
     pub(crate) phantom: PhantomData<StorageT>,
-}
-
-/// The quote impl of `ToTokens` for `usize` prints literal values
-/// including a type suffix for example `0usize`.
-///
-/// This wrapper omits the type suffix emitting `0` instead.
-struct UnsuffixedUsize(usize);
-
-impl ToTokens for UnsuffixedUsize {
-    fn to_tokens(&self, tokens: &mut TokenStream) {
-        tokens.append(Literal::usize_unsuffixed(self.0))
-    }
 }
 
 impl<StorageT> fmt::Display for CTConflictsError<StorageT>
@@ -909,7 +897,7 @@ where
             None
         };
 
-        let rule_consts = self.gen_rule_consts(code_gen)?;
+        let rule_consts = code_gen.gen_rule_consts()?;
         let token_epp = self.gen_token_epp(code_gen)?;
         let parse_function = self.gen_parse_function(code_gen, build_env)?;
         let action_wrappers = match build_env.yacc_kind() {
@@ -1153,26 +1141,6 @@ where
                 #run_parser
             }
         })
-    }
-
-    fn gen_rule_consts(
-        &self,
-        code_gen: &ParserCodegen<LexerTypesT>,
-    ) -> Result<TokenStream, proc_macro2::LexError> {
-        let grm = code_gen.grm();
-        let mut toks = TokenStream::new();
-        for ridx in grm.iter_rules() {
-            if !grm.rule_to_prods(ridx).contains(&grm.start_prod()) {
-                let r_const = format_ident!("R_{}", grm.rule_name_str(ridx).to_ascii_uppercase());
-                let storage_ty = str::parse::<TokenStream>(type_name::<LexerTypesT::StorageT>())?;
-                let ridx = UnsuffixedUsize(usize::from(ridx));
-                toks.extend(quote! {
-                    #[allow(dead_code)]
-                    pub const #r_const: #storage_ty = #ridx;
-                });
-            }
-        }
-        Ok(toks)
     }
 
     fn gen_token_epp(
