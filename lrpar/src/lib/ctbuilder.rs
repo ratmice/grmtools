@@ -16,8 +16,8 @@ use std::{
 
 use crate::{
     LexerTypes, RTParserBuilder, RecoveryKind,
-    codegen::{ParserBuildEnv, ParserBuildEnvArgs, ParserSrcEnv, QuoteOption},
-    diagnostics::{DiagnosticFormatter, SpannedDiagnosticFormatter},
+    codegen::{ParserBuildEnv, ParserBuildEnvArgs, ParserCodegen, ParserSrcEnv, QuoteOption},
+    diagnostics::DiagnosticFormatter,
 };
 
 #[cfg(feature = "_unstable_api")]
@@ -764,12 +764,10 @@ where
         src_env.check_unused_header_keys()?;
 
         self.output_file(
-            grm,
-            stable,
-            build_env.derived_mod_name(),
+            &code_gen,
             outp,
             &format!("/* CACHE INFORMATION {} */\n", cache),
-            src_env.yacc_diag(),
+            &src_env,
             &build_env,
         )?;
         let (grm, sgraph, stable) = code_gen.finish();
@@ -895,48 +893,46 @@ where
 
     fn output_file<P: AsRef<Path>>(
         &self,
-        grm: &YaccGrammar<StorageT>,
-        stable: &StateTable<StorageT>,
-        mod_name: &str,
+        code_gen: &ParserCodegen<LexerTypesT>,
         outp_rs: P,
         cache: &str,
-        _diag: &SpannedDiagnosticFormatter,
+        src_env: &ParserSrcEnv,
         build_env: &ParserBuildEnv<'_, LexerTypesT>,
     ) -> Result<(), Box<dyn Error>> {
-        let visibility = self.visibility.clone();
-        let user_actions = if let Some(
-            YaccKind::Original(YaccOriginalActionKind::UserAction) | YaccKind::Grmtools,
-        ) = self.yacckind
+        let mod_name = build_env.derived_mod_name();
+        let visibility = build_env.visibility();
+        let user_actions = if let YaccKind::Original(YaccOriginalActionKind::UserAction)
+        | YaccKind::Grmtools = build_env.yacc_kind()
         {
-            Some(self.gen_user_actions(grm)?)
+            Some(self.gen_user_actions(code_gen, src_env)?)
         } else {
             None
         };
-        let rule_consts = self.gen_rule_consts(grm)?;
-        let token_epp = self.gen_token_epp(grm)?;
-        let parse_function = self.gen_parse_function(grm, stable, build_env)?;
-        let action_wrappers = match self.yacckind.unwrap() {
+
+        let rule_consts = self.gen_rule_consts(code_gen)?;
+        let token_epp = self.gen_token_epp(code_gen)?;
+        let parse_function = self.gen_parse_function(code_gen, build_env)?;
+        let action_wrappers = match build_env.yacc_kind() {
             YaccKind::Original(YaccOriginalActionKind::UserAction) | YaccKind::Grmtools => {
-                Some(self.gen_wrappers(grm)?)
+                Some(self.gen_wrappers(code_gen, build_env)?)
             }
             YaccKind::Original(YaccOriginalActionKind::NoAction)
             | YaccKind::Original(YaccOriginalActionKind::GenericParseTree) => None,
             _ => unreachable!(),
         };
 
-        let additional_decls =
-            if let Some(YaccKind::Original(YaccOriginalActionKind::GenericParseTree)) =
-                self.yacckind
-            {
-                // `lrpar::Node`` is deprecated within the lrpar crate, but not from within this module,
-                // Once it is removed from `lrpar`, we should move the declaration here entirely.
-                Some(quote! {
-                            #[allow(unused_imports)]
-                            pub use ::lrpar::parser::_deprecated_moved_::Node;
-                })
-            } else {
-                None
-            };
+        let additional_decls = if let YaccKind::Original(YaccOriginalActionKind::GenericParseTree) =
+            build_env.yacc_kind()
+        {
+            // `lrpar::Node`` is deprecated within the lrpar crate, but not from within this module,
+            // Once it is removed from `lrpar`, we should move the declaration here entirely.
+            Some(quote! {
+                        #[allow(unused_imports)]
+                        pub use ::lrpar::parser::_deprecated_moved_::Node;
+            })
+        } else {
+            None
+        };
 
         let mod_name =
             match syn::parse_str::<proc_macro2::Ident>(mod_name) {
@@ -983,11 +979,12 @@ where
     /// Generate the main parse() function for the output file.
     fn gen_parse_function(
         &self,
-        grm: &YaccGrammar<StorageT>,
-        stable: &StateTable<StorageT>,
-        build_env: &ParserBuildEnv<'_, LexerTypesT>,
+        code_gen: &ParserCodegen<LexerTypesT>,
+        build_env: &ParserBuildEnv<LexerTypesT>,
     ) -> Result<TokenStream, Box<dyn Error>> {
-        let storaget = str::parse::<TokenStream>(type_name::<StorageT>())?;
+        let stable = code_gen.stable();
+        let grm = code_gen.grm();
+        let storaget = str::parse::<TokenStream>(type_name::<LexerTypesT::StorageT>())?;
         let lexertypest = str::parse::<TokenStream>(type_name::<LexerTypesT>())?;
         let recoverer = build_env.recoverer();
         let run_parser = match build_env.yacc_kind() {
@@ -1027,12 +1024,12 @@ where
                     let pidx = usize::from(pidx);
                     format_ident!("{}wrapper_{}", ACTION_PREFIX, pidx)
                 });
-                let edition_lifetime = if self.rust_edition != RustEdition::Rust2015 {
+                let edition_lifetime = if build_env.rust_edition() != RustEdition::Rust2015 {
                     quote!('_,)
                 } else {
                     quote!()
                 };
-                let ridx = usize::from(self.user_start_ridx(grm));
+                let ridx = usize::from(self.user_start_ridx(code_gen));
                 let action_ident = format_ident!("{}{}", ACTIONS_KIND_PREFIX, ridx);
 
                 quote! {
@@ -1081,7 +1078,7 @@ where
         let parse_fn_return_ty = match build_env.yacc_kind() {
             YaccKind::Original(YaccOriginalActionKind::UserAction) | YaccKind::Grmtools => {
                 let actiont = grm
-                    .actiontype(self.user_start_ridx(grm))
+                    .actiontype(self.user_start_ridx(code_gen))
                     .as_ref()
                     .map(|at| str::parse::<TokenStream>(at))
                     .transpose()?;
@@ -1160,13 +1157,14 @@ where
 
     fn gen_rule_consts(
         &self,
-        grm: &YaccGrammar<StorageT>,
+        code_gen: &ParserCodegen<LexerTypesT>,
     ) -> Result<TokenStream, proc_macro2::LexError> {
+        let grm = code_gen.grm();
         let mut toks = TokenStream::new();
         for ridx in grm.iter_rules() {
             if !grm.rule_to_prods(ridx).contains(&grm.start_prod()) {
                 let r_const = format_ident!("R_{}", grm.rule_name_str(ridx).to_ascii_uppercase());
-                let storage_ty = str::parse::<TokenStream>(type_name::<StorageT>())?;
+                let storage_ty = str::parse::<TokenStream>(type_name::<LexerTypesT::StorageT>())?;
                 let ridx = UnsuffixedUsize(usize::from(ridx));
                 toks.extend(quote! {
                     #[allow(dead_code)]
@@ -1179,14 +1177,15 @@ where
 
     fn gen_token_epp(
         &self,
-        grm: &YaccGrammar<StorageT>,
+        code_gen: &ParserCodegen<LexerTypesT>,
     ) -> Result<TokenStream, proc_macro2::LexError> {
+        let grm = code_gen.grm();
         let mut tidxs = Vec::new();
         for tidx in grm.iter_tidxs() {
             tidxs.push(QuoteOption(grm.token_epp(tidx)));
         }
         let const_epp_ident = format_ident!("{}EPP", GLOBAL_PREFIX);
-        let storage_ty = str::parse::<TokenStream>(type_name::<StorageT>())?;
+        let storage_ty = str::parse::<TokenStream>(type_name::<LexerTypesT::StorageT>())?;
         Ok(quote! {
             const #const_epp_ident: &[::std::option::Option<&str>] = &[
                 #(#tidxs,)*
@@ -1200,9 +1199,13 @@ where
             }
         })
     }
-
     /// Generate the wrappers that call user actions
-    fn gen_wrappers(&self, grm: &YaccGrammar<StorageT>) -> Result<TokenStream, Box<dyn Error>> {
+    fn gen_wrappers(
+        &self,
+        code_gen: &ParserCodegen<LexerTypesT>,
+        build_env: &ParserBuildEnv<LexerTypesT>,
+    ) -> Result<TokenStream, Box<dyn Error>> {
+        let grm = code_gen.grm();
         let parsed_parse_generics = make_generics(grm.parse_generics().as_deref())?;
         let (generics, type_generics, where_clause) = parsed_parse_generics.split_for_impl();
 
@@ -1231,10 +1234,10 @@ where
             let lexer_var = format_ident!("{}lexer", ACTION_PREFIX);
             let span_var = format_ident!("{}span", ACTION_PREFIX);
             let args_var = format_ident!("{}args", ACTION_PREFIX);
-            let storaget = str::parse::<TokenStream>(type_name::<StorageT>())?;
+            let storaget = str::parse::<TokenStream>(type_name::<LexerTypesT::StorageT>())?;
             let lexertypest = str::parse::<TokenStream>(type_name::<LexerTypesT>())?;
             let actionskind = str::parse::<TokenStream>(ACTIONS_KIND)?;
-            let edition_lifetime = if self.rust_edition != RustEdition::Rust2015 {
+            let edition_lifetime = if build_env.rust_edition() != RustEdition::Rust2015 {
                 Some(quote!('_,))
             } else {
                 None
@@ -1361,7 +1364,13 @@ where
     }
 
     /// Generate the user action functions (if any).
-    fn gen_user_actions(&self, grm: &YaccGrammar<StorageT>) -> Result<TokenStream, Box<dyn Error>> {
+    fn gen_user_actions(
+        &self,
+        code_gen: &ParserCodegen<LexerTypesT>,
+        src_env: &ParserSrcEnv,
+    ) -> Result<TokenStream, Box<dyn Error>> {
+        let grm = code_gen.grm();
+        let _diag = src_env.yacc_diag();
         let programs = grm
             .programs()
             .as_ref()
@@ -1426,7 +1435,7 @@ where
             let lexer_var = format_ident!("{}lexer", ACTION_PREFIX);
             let span_var = format_ident!("{}span", ACTION_PREFIX);
             let ridx_var = format_ident!("{}ridx", ACTION_PREFIX);
-            let storaget = str::parse::<TokenStream>(type_name::<StorageT>())?;
+            let storaget = str::parse::<TokenStream>(type_name::<LexerTypesT::StorageT>())?;
             let lexertypest = str::parse::<TokenStream>(type_name::<LexerTypesT>())?;
             let bind_parse_param = if !parse_param_unit {
                 Some(quote! {let _ = #parse_paramname;})
@@ -1496,7 +1505,11 @@ where
     /// Return the `RIdx` of the %start rule in the grammar (which will not be the same as
     /// grm.start_rule_idx because the latter has an additional rule insert by cfgrammar
     /// which then calls the user's %start rule).
-    fn user_start_ridx(&self, grm: &YaccGrammar<StorageT>) -> RIdx<StorageT> {
+    fn user_start_ridx(
+        &self,
+        code_gen: &ParserCodegen<LexerTypesT>,
+    ) -> RIdx<LexerTypesT::StorageT> {
+        let grm = code_gen.grm();
         debug_assert_eq!(grm.prod(grm.start_prod()).len(), 1);
         match grm.prod(grm.start_prod())[0] {
             Symbol::Rule(ridx) => ridx,
