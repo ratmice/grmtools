@@ -142,9 +142,7 @@ impl FromStr for ASTWithValidityInfo {
     }
 }
 
-/// An AST representing a grammar. This is built up gradually: when it is finished, the
-/// `complete_and_validate` must be called exactly once in order to finish the set-up. At that
-/// point, any further mutations made to the struct lead to undefined behaviour.
+/// An AST representing a grammar. Typically these will only be constructed through [`ASTWithValidityInfo`] struct.
 #[derive(Debug, Clone)]
 #[cfg_attr(test, derive(PartialEq))]
 #[non_exhaustive]
