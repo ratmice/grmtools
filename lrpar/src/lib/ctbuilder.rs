@@ -23,7 +23,7 @@ use crate::{
 use crate::unstable_api::UnstableApi;
 
 use cfgrammar::{
-    Location, RIdx, Span, Symbol,
+    Location, RIdx, Symbol,
     header::{
         GrmtoolsSectionParser, Header, HeaderError, HeaderErrorKind, HeaderValue, Namespaced,
         Setting, Value,
@@ -954,7 +954,6 @@ where
             &derived_mod_name,
             outp,
             &format!("/* CACHE INFORMATION {} */\n", cache),
-            &yacc_diag,
         )?;
         let conflicts = if stable.conflicts().is_some() {
             Some((sgraph, stable))
@@ -1083,14 +1082,13 @@ where
         mod_name: &str,
         outp_rs: P,
         cache: &str,
-        diag: &SpannedDiagnosticFormatter,
     ) -> Result<(), Box<dyn Error>> {
         let visibility = self.visibility.clone();
         let user_actions = if let Some(
             YaccKind::Original(YaccOriginalActionKind::UserAction) | YaccKind::Grmtools,
         ) = self.yacckind
         {
-            Some(self.gen_user_actions(grm, diag)?)
+            Some(self.gen_user_actions(grm)?)
         } else {
             None
         };
@@ -1611,11 +1609,7 @@ where
     }
 
     /// Generate the user action functions (if any).
-    fn gen_user_actions(
-        &self,
-        grm: &YaccGrammar<StorageT>,
-        diag: &SpannedDiagnosticFormatter,
-    ) -> Result<TokenStream, Box<dyn Error>> {
+    fn gen_user_actions(&self, grm: &YaccGrammar<StorageT>) -> Result<TokenStream, Box<dyn Error>> {
         let programs = grm
             .programs()
             .as_ref()
@@ -1649,20 +1643,10 @@ where
             for i in 0..grm.prod(pidx).len() {
                 let argt = match grm.prod(pidx)[i] {
                     Symbol::Rule(ref_ridx) => {
-                        if let Some(action_type) = grm.actiontype(ref_ridx).as_ref() {
-                            str::parse::<TokenStream>(action_type)?
-                        } else {
-                            let mut s = String::from("\n");
-                            let rule_span = grm.rule_name_span(ref_ridx);
-                            s.push_str(&diag.file_location_msg("Error", Some(rule_span)));
-                            s.push('\n');
-                            s.push_str(&diag.underline_span_with_text(
-                                rule_span,
-                                "Rule missing action type".to_string(),
-                                '^',
-                            ));
-                            return Err(ErrorString(s).into());
-                        }
+                        let action_type = grm.actiontype(ref_ridx)
+                           .as_ref()
+                           .expect("actiontype should have been checked during complete_and_validate for this YaccKind");
+                        str::parse::<TokenStream>(action_type)?
                     }
                     Symbol::Token(_) => {
                         let lexemet =
@@ -1700,18 +1684,7 @@ where
 
             // Iterate over all $-arguments and replace them with their respective
             // element from the argument vector (e.g. $1 is replaced by args[0]).
-            let pre_action = grm.action(pidx).as_ref().ok_or_else(|| {
-                let mut s = String::from("\n");
-                let span = grm.prod_span(pidx);
-                s.push_str(&diag.file_location_msg("Error", Some(span)));
-                s.push('\n');
-                s.push_str(&diag.underline_span_with_text(
-                    span,
-                    "Production is missing action code".to_string(),
-                    '^',
-                ));
-                ErrorString(s)
-            })?;
+            let pre_action = grm.action(pidx).as_ref().expect("action code should have been checked during complete_and_validate for this YaccKind");
             let mut last = 0;
             let mut outs = String::new();
             loop {
@@ -1735,18 +1708,7 @@ where
                             write!(outs, "{prefix}arg_", prefix = ACTION_PREFIX).ok();
                             last = last + off + "$".len();
                         } else {
-                            let span = grm.action_span(pidx).unwrap();
-                            let inner_span =
-                                Span::new(span.start() + last + off + "$".len(), span.end());
-                            let mut s = String::from("\n");
-                            s.push_str(&diag.file_location_msg("Error", Some(inner_span)));
-                            s.push('\n');
-                            s.push_str(&diag.underline_span_with_text(
-                                inner_span,
-                                "Unknown text following '$'".to_string(),
-                                '^',
-                            ));
-                            return Err(ErrorString(s).into());
+                            unreachable!("action variables checked during complete_and_validate");
                         }
                     }
                     None => {
