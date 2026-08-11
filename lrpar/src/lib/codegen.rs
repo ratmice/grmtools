@@ -3,7 +3,6 @@
 
 use std::{
     any::type_name,
-    error::Error,
     fmt::{self, Write},
     hash::Hash,
     marker::PhantomData,
@@ -12,17 +11,19 @@ use std::{
 
 use crate::{
     LexerTypes, RecoveryKind, RustEdition, SerialisationFormat, Visibility,
-    ctbuilder::{CTConflictsError, ERROR, FixIntConfig, VarIntConfig, indent},
-    diagnostics::{DiagnosticFormatter, SpannedDiagnosticFormatter},
+    ctbuilder::{FixIntConfig, VarIntConfig},
 };
 
 use cfgrammar::{
     Location, RIdx, Span, Symbol,
-    header::{GrmtoolsSectionParser, Header, HeaderValue},
-    yacc::{YaccGrammar, YaccKind, YaccOriginalActionKind, ast::ASTWithValidityInfo},
+    header::{GrmtoolsSectionParser, Header, HeaderError, HeaderValue},
+    markmap::MergeError,
+    yacc::{
+        YaccGrammar, YaccGrammarError, YaccKind, YaccOriginalActionKind, ast::ASTWithValidityInfo,
+    },
 };
 
-use lrtable::{Minimiser, StateGraph, StateTable, from_yacc};
+use lrtable::{Minimiser, StateGraph, StateTable, StateTableError, from_yacc};
 use proc_macro2::{Literal, TokenStream};
 use quote::{ToTokens, TokenStreamExt, format_ident, quote};
 use syn::{Generics, parse_quote};
@@ -34,13 +35,145 @@ const ACTIONS_KIND: &str = "__GtActionsKind";
 const ACTIONS_KIND_PREFIX: &str = "Ak";
 const ACTIONS_KIND_HIDDEN: &str = "__GtActionsKindHidden";
 
-pub(crate) struct ParserSrcEnv<'a> {
+pub(crate) enum ParserSrcEnvError {
+    GrmtoolsSectionParseError(Vec<HeaderError<Span>>),
+    GrmtoolsSectionMergeError(MergeError<String, Box<HeaderValue<Location>>>),
+    GrmtoolsSectionLookupError(HeaderError<Location>),
+    MissingYaccKind,
+    MissingModName,
+}
+
+pub(crate) enum ParserBuildEnvError<LexerTypesT>
+where
+    LexerTypesT: LexerTypes,
+    usize: num_traits::AsPrimitive<LexerTypesT::StorageT>,
+{
+    StateTableError(StateTableError<LexerTypesT::StorageT>),
+    YaccGrammarErrors(Vec<YaccGrammarError>),
+    GrmtoolsSectionUnusedKeys(Vec<String>),
+    GrmtoolsSectionMissingRequiredKeys(Vec<String>),
+}
+
+pub(crate) enum CodegenError {
+    ProcMacro2Error(proc_macro2::LexError),
+    InvalidRustIdentifierModName(syn::Error, String),
+    InvalidParseGenerics(syn::Error),
+    WincodeError(wincode::WriteError),
+}
+
+impl From<Vec<HeaderError<Span>>> for ParserSrcEnvError {
+    fn from(it: Vec<HeaderError<Span>>) -> Self {
+        ParserSrcEnvError::GrmtoolsSectionParseError(it)
+    }
+}
+
+impl From<MergeError<String, Box<HeaderValue<Location>>>> for ParserSrcEnvError {
+    fn from(it: MergeError<String, Box<HeaderValue<Location>>>) -> Self {
+        ParserSrcEnvError::GrmtoolsSectionMergeError(it)
+    }
+}
+
+impl From<HeaderError<Location>> for ParserSrcEnvError {
+    fn from(it: HeaderError<Location>) -> Self {
+        ParserSrcEnvError::GrmtoolsSectionLookupError(it)
+    }
+}
+
+impl<LexerTypesT> From<Vec<YaccGrammarError>> for ParserBuildEnvError<LexerTypesT>
+where
+    LexerTypesT: LexerTypes,
+    usize: num_traits::AsPrimitive<LexerTypesT::StorageT>,
+{
+    fn from(it: Vec<YaccGrammarError>) -> Self {
+        ParserBuildEnvError::YaccGrammarErrors(it)
+    }
+}
+
+impl<LexerTypesT> From<StateTableError<LexerTypesT::StorageT>> for ParserBuildEnvError<LexerTypesT>
+where
+    LexerTypesT: LexerTypes,
+    usize: num_traits::AsPrimitive<LexerTypesT::StorageT>,
+{
+    fn from(it: StateTableError<LexerTypesT::StorageT>) -> Self {
+        ParserBuildEnvError::StateTableError(it)
+    }
+}
+
+impl From<proc_macro2::LexError> for CodegenError {
+    fn from(it: proc_macro2::LexError) -> Self {
+        CodegenError::ProcMacro2Error(it)
+    }
+}
+
+impl From<wincode::WriteError> for CodegenError {
+    fn from(it: wincode::WriteError) -> Self {
+        CodegenError::WincodeError(it)
+    }
+}
+
+impl fmt::Display for ParserSrcEnvError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(&match self {
+            Self::GrmtoolsSectionParseError(errs) => errs
+                .iter()
+                .map(|e| e.to_string())
+                .collect::<Vec<_>>()
+                .join("\n"),
+            Self::GrmtoolsSectionMergeError(e) => e.to_string(),
+            Self::GrmtoolsSectionLookupError(e) => e.to_string(),
+            Self::MissingYaccKind => "Code generator cannot resolve yacc kind".to_string(),
+            Self::MissingModName => "Code generator requires a mod name".to_string(),
+        })
+    }
+}
+
+impl<LexerTypesT> fmt::Display for ParserBuildEnvError<LexerTypesT>
+where
+    LexerTypesT: LexerTypes,
+    usize: num_traits::AsPrimitive<LexerTypesT::StorageT>,
+{
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(&match self {
+            Self::StateTableError(e) => format!("{}", e).to_string(),
+            Self::YaccGrammarErrors(errs) => errs
+                .iter()
+                .map(|e| e.to_string())
+                .collect::<Vec<_>>()
+                .join("\n"),
+            Self::GrmtoolsSectionUnusedKeys(keys) => {
+                format!("Unused keys in %grmtools section: {}", keys.join(", "))
+            }
+            Self::GrmtoolsSectionMissingRequiredKeys(keys) => format!(
+                "Required keys are missing from %grmtools section: {}",
+                keys.join(", ")
+            ),
+        })
+    }
+}
+impl fmt::Display for CodegenError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(&match self {
+            Self::ProcMacro2Error(e) => e.to_string(),
+            Self::InvalidRustIdentifierModName(e, s) => format!(
+                "mod_name '{}' is not a valid rust identifier due to '{}'",
+                s, e
+            ),
+            Self::InvalidParseGenerics(e) => format!("Unable to parse %parse-generics '{e}'"),
+            Self::WincodeError(e) => format!("Unable to serialize parser {e}"),
+        })
+    }
+}
+
+pub(crate) struct ParserSrcEnv<'a, LexerTypesT>
+where
+    LexerTypesT: LexerTypes,
+    usize: num_traits::AsPrimitive<LexerTypesT::StorageT>,
+{
     src: &'a str,
-    // We store the path here so we can generate a module name from it if needed.
-    // But should never use it for filesystem interaction within this module.
-    path: &'a Path,
-    diagnostics: SpannedDiagnosticFormatter<'a>,
+    fallback_modname: Option<String>,
+    grammar_path_cache_entry: Option<String>,
     header: Header<Location>,
+    phantom: PhantomData<LexerTypesT::StorageT>,
 }
 
 pub(crate) struct ParserBuildEnvArgs<'a> {
@@ -66,6 +199,8 @@ where
     cache_args: ParserBuildEnvArgs<'a>,
     phantom_storaget: PhantomData<LexerTypesT::StorageT>,
     mod_name: String,
+    grammar_path: Option<String>,
+    header: Header<Location>,
 }
 
 pub(crate) struct ParserCodegen<LexerTypesT>
@@ -126,27 +261,41 @@ impl<'a> ParserBuildEnvArgs<'a> {
     }
 }
 
-impl<'a> ParserSrcEnv<'a> {
+impl<'a, LexerTypesT> ParserSrcEnv<'a, LexerTypesT>
+where
+    LexerTypesT: LexerTypes,
+    usize: num_traits::AsPrimitive<LexerTypesT::StorageT>,
+{
     pub(crate) fn new_with_header(
         src: &'a str,
-        path: &'a Path,
+        path: Option<&Path>,
         header: Header<Location>,
-    ) -> ParserSrcEnv<'a> {
-        let diagnostics = SpannedDiagnosticFormatter::new(src, path);
+    ) -> ParserSrcEnv<'a, LexerTypesT> {
+        let fallback_modname = if let Some(path) = path {
+            // When the user hasn't specified a module name, so we create one automatically: what we
+            // do is strip off all the filename extensions (note that it's likely that inp ends
+            // with `y.rs`, so we potentially have to strip off more than one extension) and
+            // then add `_y` to the end.
+            let mut stem = path.to_str().unwrap();
+            loop {
+                let new_stem = Path::new(stem).file_stem().unwrap().to_str().unwrap();
+                if stem == new_stem {
+                    break;
+                }
+                stem = new_stem;
+            }
+            Some(format!("{}_y", stem))
+        } else {
+            None
+        };
+        let grammar_path_cache_entry = path.map(|s| s.to_string_lossy().to_string());
         ParserSrcEnv {
             src,
-            path,
+            fallback_modname,
+            grammar_path_cache_entry,
             header,
-            diagnostics,
+            phantom: PhantomData,
         }
-    }
-
-    pub(crate) fn path(&self) -> &Path {
-        self.path
-    }
-
-    pub(crate) fn yacc_diag(&self) -> &SpannedDiagnosticFormatter<'a> {
-        &self.diagnostics
     }
 
     pub(crate) fn header_mut(&mut self) -> &mut Header<Location> {
@@ -157,52 +306,13 @@ impl<'a> ParserSrcEnv<'a> {
         &self.header
     }
 
-    fn merge_headers(&mut self) -> Result<(), Box<dyn Error>> {
+    fn merge_headers(&mut self) -> Result<(), ParserSrcEnvError> {
         let (parsed_header, _) = self.parse_header()?;
         Ok(self.header.merge_from(parsed_header)?)
     }
 
-    fn parse_header(&self) -> Result<(Header<Span>, usize), Box<dyn Error>> {
-        GrmtoolsSectionParser::new(self.src, false)
-            .parse()
-            .map_err(|es| {
-                let mut out = String::new();
-                out.push_str(&format!(
-                    "\n{ERROR}{}\n",
-                    self.yacc_diag()
-                        .file_location_msg(" parsing the `%grmtools` section", None)
-                ));
-                for e in es {
-                    out.push_str(&indent(
-                        "     ",
-                        &self.yacc_diag().format_error(e).to_string(),
-                    ));
-                    out.push('\n');
-                }
-                ErrorString(out).into()
-            })
-    }
-
-    pub(crate) fn check_unused_header_keys(&self) -> Result<(), Box<dyn Error>> {
-        let unused_keys = self.header.unused();
-        if !unused_keys.is_empty() {
-            return Err(format!("Unused keys in header: {}", unused_keys.join(", ")).into());
-        }
-        let missing_keys = self
-            .header
-            .missing()
-            .iter()
-            .map(|s| s.as_str())
-            .collect::<Vec<_>>();
-        if !missing_keys.is_empty() {
-            Err(format!(
-                "Required values were missing from the header: {}",
-                missing_keys.join(", ")
-            )
-            .into())
-        } else {
-            Ok(())
-        }
+    fn parse_header(&self) -> Result<(Header<Span>, usize), Vec<HeaderError<Span>>> {
+        GrmtoolsSectionParser::new(self.src, false).parse()
     }
 
     /// Looks up the `yacckind` field from the header, marks the field
@@ -210,7 +320,7 @@ impl<'a> ParserSrcEnv<'a> {
     fn resolve_ast_with_validity_info(
         &mut self,
         from_ast: Option<&ASTWithValidityInfo>,
-    ) -> Result<ASTWithValidityInfo, Box<dyn Error>> {
+    ) -> Result<ASTWithValidityInfo, ParserSrcEnvError> {
         self.header.mark_used(&"yacckind".to_string());
         if let Some(ast) = from_ast {
             Ok(ast.clone())
@@ -223,13 +333,13 @@ impl<'a> ParserSrcEnv<'a> {
         {
             Ok(ASTWithValidityInfo::new(yk, self.src))
         } else {
-            Err("Missing 'yacckind'".to_string())?
+            Err(ParserSrcEnvError::MissingYaccKind)?
         }
     }
 
     /// Looks up the `recoverer` field in the header, marks the field
     /// as used, and defaulting to `CPCTPlus` if unfound.
-    fn resolve_recoverer(&mut self) -> Result<RecoveryKind, Box<dyn Error>> {
+    fn resolve_recoverer(&mut self) -> Result<RecoveryKind, ParserSrcEnvError> {
         self.header.mark_used(&"recoverer".to_string());
         let rk_val = self
             .header
@@ -245,7 +355,7 @@ impl<'a> ParserSrcEnv<'a> {
 
     /// Looks up the `serialisation_format` field in the header, marks the field
     /// as used, and defaults to `VariableSizedInteger` if unfound.
-    fn resolve_serialisation_format(&mut self) -> Result<SerialisationFormat, Box<dyn Error>> {
+    fn resolve_serialisation_format(&mut self) -> Result<SerialisationFormat, ParserSrcEnvError> {
         self.header.mark_used(&"serialisation_format".to_string());
         if let Some(ec_val) = self
             .header
@@ -260,31 +370,21 @@ impl<'a> ParserSrcEnv<'a> {
 
     /// Looks up the `mod_name` from the `args`, and defaults to
     /// the `{filename}_y` with any file extenstion stripped off.
-    fn resolve_mod_name(&self, args: &ParserBuildEnvArgs) -> String {
+    fn resolve_mod_name(&self, args: &ParserBuildEnvArgs) -> Result<String, ParserSrcEnvError> {
         match &args.mod_name {
-            Some(s) => s.to_owned(),
-            None => {
-                // The user hasn't specified a module name, so we create one automatically: what we
-                // do is strip off all the filename extensions (note that it's likely that inp ends
-                // with `y.rs`, so we potentially have to strip off more than one extension) and
-                // then add `_y` to the end.
-                let mut stem = self.path.to_str().unwrap();
-                loop {
-                    let new_stem = Path::new(stem).file_stem().unwrap().to_str().unwrap();
-                    if stem == new_stem {
-                        break;
-                    }
-                    stem = new_stem;
-                }
-                format!("{}_y", stem)
-            }
+            Some(s) => Ok(s.to_owned()),
+            None => self
+                .fallback_modname
+                .as_ref()
+                .ok_or(ParserSrcEnvError::MissingModName)
+                .map(|s| s.to_string()),
         }
     }
 
-    pub(crate) fn build_env<LexerTypesT>(
-        &mut self,
+    pub(crate) fn build_env(
+        mut self,
         args: ParserBuildEnvArgs<'a>,
-    ) -> Result<ParserBuildEnv<'a, LexerTypesT>, Box<dyn Error>>
+    ) -> Result<ParserBuildEnv<'a, LexerTypesT>, ParserSrcEnvError>
     where
         LexerTypesT: LexerTypes,
         usize: num_traits::AsPrimitive<LexerTypesT::StorageT>,
@@ -294,7 +394,8 @@ impl<'a> ParserSrcEnv<'a> {
             self.resolve_ast_with_validity_info(args.ast_with_validity_info)?;
         let recoverer = self.resolve_recoverer()?;
         let serialisation_format = self.resolve_serialisation_format()?;
-        let mod_name = self.resolve_mod_name(&args);
+        let mod_name = self.resolve_mod_name(&args)?;
+        let grammar_path = self.grammar_path_cache_entry;
 
         Ok(ParserBuildEnv {
             ast_with_validity_info,
@@ -302,6 +403,8 @@ impl<'a> ParserSrcEnv<'a> {
             recoverer,
             serialisation_format,
             mod_name,
+            grammar_path,
+            header: self.header,
             phantom_storaget: PhantomData,
         })
     }
@@ -314,6 +417,10 @@ where
 {
     pub(crate) fn ast_with_validity_info(&self) -> &ASTWithValidityInfo {
         &self.ast_with_validity_info
+    }
+
+    pub(crate) fn header_mut(&mut self) -> &mut Header<Location> {
+        &mut self.header
     }
 
     pub(crate) fn serialisation_format(&self) -> &SerialisationFormat {
@@ -356,59 +463,34 @@ where
         self.ast_with_validity_info.yacc_kind()
     }
 
+    pub(crate) fn check_unused_header_keys(&self) -> Result<(), ParserBuildEnvError<LexerTypesT>> {
+        let unused_keys = self.header.unused();
+        if !unused_keys.is_empty() {
+            return Err(ParserBuildEnvError::GrmtoolsSectionUnusedKeys(unused_keys));
+        }
+        let missing_keys = self
+            .header
+            .missing()
+            .iter()
+            .map(|s| s.to_string())
+            .collect::<Vec<_>>();
+        if !missing_keys.is_empty() {
+            Err(ParserBuildEnvError::GrmtoolsSectionMissingRequiredKeys(
+                missing_keys,
+            ))
+        } else {
+            Ok(())
+        }
+    }
+
     pub(crate) fn code_generator(
         &self,
-        src_env: &ParserSrcEnv,
         timestamp: &str,
-    ) -> Result<ParserCodegen<LexerTypesT>, Box<dyn Error>> {
-        let grm = match YaccGrammar::<LexerTypesT::StorageT>::new_from_ast_with_validity_info(
+    ) -> Result<ParserCodegen<LexerTypesT>, ParserBuildEnvError<LexerTypesT>> {
+        let grm = YaccGrammar::<LexerTypesT::StorageT>::new_from_ast_with_validity_info(
             &self.ast_with_validity_info,
-        ) {
-            Ok(grm) => grm,
-            Err(errs) => {
-                let mut out = String::new();
-                out.push_str(&format!(
-                    "\n{ERROR}{}\n",
-                    src_env.yacc_diag().file_location_msg("", None)
-                ));
-                for e in errs {
-                    out.push_str(&indent(
-                        "     ",
-                        &src_env.yacc_diag().format_error(e).to_string(),
-                    ));
-                    out.push('\n');
-                }
-                return Err(ErrorString(out).into());
-            }
-        };
-
+        )?;
         let (sgraph, stable) = from_yacc(&grm, Minimiser::Pager)?;
-        if self.cache_args.error_on_conflicts
-            && let Some(c) = stable.conflicts()
-        {
-            match (grm.expect(), grm.expectrr()) {
-                (Some(i), Some(j)) if i == c.sr_len() && j == c.rr_len() => (),
-                (Some(i), None) if i == c.sr_len() && 0 == c.rr_len() => (),
-                (None, Some(j)) if 0 == c.sr_len() && j == c.rr_len() => (),
-                (None, None) if 0 == c.rr_len() && 0 == c.sr_len() => (),
-                _ => {
-                    let conflicts_diagnostic = src_env.yacc_diag().format_conflicts::<LexerTypesT>(
-                        &grm,
-                        self.ast_with_validity_info.ast(),
-                        c,
-                        &sgraph,
-                        &stable,
-                    );
-                    return Err(Box::new(CTConflictsError {
-                        conflicts_diagnostic,
-                        phantom: PhantomData,
-                        #[cfg(test)]
-                        stable,
-                    }));
-                }
-            }
-        }
-
         Ok(ParserCodegen {
             grm,
             stable,
@@ -455,15 +537,14 @@ where
 
     pub(crate) fn generate(
         &self,
-        src_env: &ParserSrcEnv,
         build_env: &ParserBuildEnv<LexerTypesT>,
-    ) -> Result<String, Box<dyn Error>> {
+    ) -> Result<String, CodegenError> {
         let mod_name = build_env.derived_mod_name();
         let visibility = build_env.visibility();
         let user_actions = if let YaccKind::Original(YaccOriginalActionKind::UserAction)
         | YaccKind::Grmtools = build_env.yacc_kind()
         {
-            Some(self.gen_user_actions(src_env)?)
+            Some(self.gen_user_actions()?)
         } else {
             None
         };
@@ -492,15 +573,15 @@ where
             None
         };
 
-        let mod_name =
-            match syn::parse_str::<proc_macro2::Ident>(mod_name) {
-                Ok(s) => s,
-                Err(e) => return Err(format!(
-                    "CTParserBuilder::mod_name(\"{}\") is not a valid rust identifier due to '{}'",
-                    mod_name, e
-                )
-                .into()),
-            };
+        let mod_name = match syn::parse_str::<proc_macro2::Ident>(mod_name) {
+            Ok(s) => s,
+            Err(e) => {
+                return Err(CodegenError::InvalidRustIdentifierModName(
+                    e,
+                    mod_name.to_string(),
+                ));
+            }
+        };
         let out_tokens = quote! {
             #visibility mod #mod_name {
                 // At the top so that `user_actions` may contain #![inner_attribute]
@@ -532,14 +613,10 @@ where
 
     /// Generate the cache, which determines if anything's changed enough that we need to
     /// regenerate outputs and force rustc to recompile.
-    fn gen_cache(
-        &self,
-        src_env: &ParserSrcEnv,
-        build_env: &ParserBuildEnv<LexerTypesT>,
-    ) -> TokenStream {
+    fn gen_cache(&self, build_env: &ParserBuildEnv<LexerTypesT>) -> TokenStream {
         let grm = self.grm();
-        let build_time = env!("VERGEN_BUILD_TIMESTAMP");
-        let grammar_path = src_env.path().to_string_lossy();
+        let build_time = &self.timestamp;
+        let grammar_path = &build_env.grammar_path;
         let mod_name = QuoteOption(build_env.specified_mod_name());
         let visibility = build_env.visibility().to_variant_tokens();
         let rust_edition = build_env.rust_edition().to_variant_tokens();
@@ -578,18 +655,13 @@ where
         quote!(#cache_info_str)
     }
 
-    pub(crate) fn cache_str(
-        &self,
-        src_env: &ParserSrcEnv,
-        build_env: &ParserBuildEnv<LexerTypesT>,
-    ) -> String {
-        self.gen_cache(src_env, build_env).to_string()
+    pub(crate) fn cache_str(&self, build_env: &ParserBuildEnv<LexerTypesT>) -> String {
+        self.gen_cache(build_env).to_string()
     }
 
     /// Generate the user action functions (if any).
-    fn gen_user_actions(&self, src_env: &ParserSrcEnv) -> Result<TokenStream, Box<dyn Error>> {
+    fn gen_user_actions(&self) -> Result<TokenStream, CodegenError> {
         let grm = self.grm();
-        let diag = src_env.yacc_diag();
         let programs = grm
             .programs()
             .as_ref()
@@ -623,20 +695,10 @@ where
             for i in 0..grm.prod(pidx).len() {
                 let argt = match grm.prod(pidx)[i] {
                     Symbol::Rule(ref_ridx) => {
-                        if let Some(action_type) = grm.actiontype(ref_ridx).as_ref() {
-                            str::parse::<TokenStream>(action_type)?
-                        } else {
-                            let mut s = String::from("\n");
-                            let rule_span = grm.rule_name_span(ref_ridx);
-                            s.push_str(&diag.file_location_msg("Error", Some(rule_span)));
-                            s.push('\n');
-                            s.push_str(&diag.underline_span_with_text(
-                                rule_span,
-                                "Rule missing action type".to_string(),
-                                '^',
-                            ));
-                            return Err(ErrorString(s).into());
-                        }
+                        let action_type = grm.actiontype(ref_ridx)
+                           .as_ref()
+                           .expect("actiontype should have been checked during complete_and_validate for this YaccKind");
+                        str::parse::<TokenStream>(action_type)?
                     }
                     Symbol::Token(_) => {
                         let lexemet =
@@ -674,18 +736,7 @@ where
 
             // Iterate over all $-arguments and replace them with their respective
             // element from the argument vector (e.g. $1 is replaced by args[0]).
-            let pre_action = grm.action(pidx).as_ref().ok_or_else(|| {
-                let mut s = String::from("\n");
-                let span = grm.prod_span(pidx);
-                s.push_str(&diag.file_location_msg("Error", Some(span)));
-                s.push('\n');
-                s.push_str(&diag.underline_span_with_text(
-                    span,
-                    "Production is missing action code".to_string(),
-                    '^',
-                ));
-                ErrorString(s)
-            })?;
+            let pre_action = grm.action(pidx).as_ref().expect("action code should have been checked during complete_and_validate for this YaccKind");
             let mut last = 0;
             let mut outs = String::new();
             loop {
@@ -709,18 +760,7 @@ where
                             write!(outs, "{prefix}arg_", prefix = ACTION_PREFIX).ok();
                             last = last + off + "$".len();
                         } else {
-                            let span = grm.action_span(pidx).unwrap();
-                            let inner_span =
-                                Span::new(span.start() + last + off + "$".len(), span.end());
-                            let mut s = String::from("\n");
-                            s.push_str(&diag.file_location_msg("Error", Some(inner_span)));
-                            s.push('\n');
-                            s.push_str(&diag.underline_span_with_text(
-                                inner_span,
-                                "Unknown text following '$'".to_string(),
-                                '^',
-                            ));
-                            return Err(ErrorString(s).into());
+                            unreachable!("action variables checked during complete_and_validate");
                         }
                     }
                     None => {
@@ -796,7 +836,7 @@ where
     fn gen_parse_function(
         &self,
         build_env: &ParserBuildEnv<LexerTypesT>,
-    ) -> Result<TokenStream, Box<dyn Error>> {
+    ) -> Result<TokenStream, CodegenError> {
         let stable = self.stable();
         let grm = self.grm();
         let storaget = str::parse::<TokenStream>(type_name::<LexerTypesT::StorageT>())?;
@@ -974,7 +1014,7 @@ where
     fn gen_wrappers(
         &self,
         build_env: &ParserBuildEnv<LexerTypesT>,
-    ) -> Result<TokenStream, Box<dyn Error>> {
+    ) -> Result<TokenStream, CodegenError> {
         let grm = self.grm();
         let parsed_parse_generics = make_generics(grm.parse_generics().as_deref())?;
         let (generics, type_generics, where_clause) = parsed_parse_generics.split_for_impl();
@@ -1146,22 +1186,6 @@ where
     }
 }
 
-/// A string which uses `Display` for it's `Debug` impl.
-struct ErrorString(String);
-impl fmt::Display for ErrorString {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        let ErrorString(s) = self;
-        write!(f, "{}", s)
-    }
-}
-impl fmt::Debug for ErrorString {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        let ErrorString(s) = self;
-        write!(f, "{}", s)
-    }
-}
-impl Error for ErrorString {}
-
 /// The quote impl of `ToTokens` for `Option` prints an empty string for `None`
 /// and the inner value for `Some(inner_value)`.
 ///
@@ -1266,12 +1290,12 @@ impl ToTokens for SerialisationFormat {
     }
 }
 
-pub(crate) fn make_generics(parse_generics: Option<&str>) -> Result<Generics, Box<dyn Error>> {
+pub(crate) fn make_generics(parse_generics: Option<&str>) -> Result<Generics, CodegenError> {
     if let Some(parse_generics) = parse_generics {
         let tokens = str::parse::<TokenStream>(parse_generics)?;
         match syn::parse2(quote!(<'lexer, 'input: 'lexer, #tokens>)) {
             Ok(res) => Ok(res),
-            Err(err) => Err(format!("unable to parse %parse-generics: {}", err).into()),
+            Err(err) => Err(CodegenError::InvalidParseGenerics(err)),
         }
     } else {
         Ok(parse_quote!(<'lexer, 'input: 'lexer>))

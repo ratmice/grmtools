@@ -15,8 +15,11 @@ use std::{
 
 use crate::{
     LexerTypes, RTParserBuilder, RecoveryKind,
-    codegen::{ParserBuildEnv, ParserBuildEnvArgs, ParserCodegen, ParserSrcEnv},
-    diagnostics::DiagnosticFormatter,
+    codegen::{
+        ParserBuildEnv, ParserBuildEnvArgs, ParserBuildEnvError, ParserCodegen, ParserSrcEnv,
+        ParserSrcEnvError,
+    },
+    diagnostics::{DiagnosticFormatter, SpannedDiagnosticFormatter},
 };
 
 #[cfg(feature = "_unstable_api")]
@@ -612,14 +615,31 @@ where
             read_to_string(grmp).map_err(|e| format!("When reading '{}': {e}", grmp.display()))?
         };
 
-        let mut src_env = ParserSrcEnv::new_with_header(&inc, grmp, header);
+        let src_env = ParserSrcEnv::new_with_header(&inc, Some(grmp), header);
+        let yacc_diag = SpannedDiagnosticFormatter::new(&inc, grmp);
         let build_args = ParserBuildEnvArgs::new()
             .ast_with_validity_info(self.from_ast.as_ref())
             .mod_name(self.mod_name)
             .show_warnings(self.show_warnings)
             .error_on_conflicts(self.error_on_conflicts)
-            .warnings_are_errors(self.warnings_are_errors);
-        let build_env = src_env.build_env::<LexerTypesT>(build_args)?;
+            .warnings_are_errors(self.warnings_are_errors)
+            .visibility(self.visibility.clone())
+            .rust_edition(self.rust_edition);
+        let mut build_env = src_env.build_env(build_args).map_err(|e| match e {
+            ParserSrcEnvError::GrmtoolsSectionParseError(es) => {
+                let mut out = String::new();
+                out.push_str(&format!(
+                    "\n{ERROR}{}\n",
+                    yacc_diag.file_location_msg(" parsing the `%grmtools` section", None)
+                ));
+                for e in es {
+                    out.push_str(&indent("     ", &yacc_diag.format_error(e).to_string()));
+                    out.push('\n');
+                }
+                Box::<dyn Error>::from(ErrorString(out))
+            }
+            e => e.to_string().into(),
+        })?;
         // Temporarily we update self.yacckind and self.recoverer from the build_env
         // Until codegen reads these variables from the build_env directly.
         self.recoverer = Some(build_env.recoverer());
@@ -630,19 +650,19 @@ where
             let mut out = String::new();
             out.push_str(&format!(
                 "\n{ERROR}{}\n",
-                src_env.yacc_diag().file_location_msg("", None)
+                yacc_diag.file_location_msg("", None)
             ));
             for e in warnings {
                 out.push_str(&format!(
                     "{}\n",
-                    indent("     ", &src_env.yacc_diag().format_warning(e).to_string())
+                    indent("     ", &yacc_diag.format_warning(e).to_string())
                 ));
             }
             return Err(ErrorString(out).into());
         } else if !warnings.is_empty() {
             for w in warnings {
-                let ws_loc = src_env.yacc_diag().file_location_msg("", None);
-                let ws = indent("     ", &src_env.yacc_diag().format_warning(w).to_string());
+                let ws_loc = yacc_diag.file_location_msg("", None);
+                let ws = indent("     ", &yacc_diag.format_warning(w).to_string());
                 // Assume if this variable is set we are running under cargo.
                 if std::env::var("OUT_DIR").is_ok() && self.show_warnings {
                     for line in ws_loc.lines().chain(ws.lines()) {
@@ -661,17 +681,29 @@ where
         }
 
         let timestamp = env!("VERGEN_BUILD_TIMESTAMP");
-        let code_gen = build_env.code_generator(&src_env, timestamp)?;
+        let code_gen = build_env.code_generator(timestamp).map_err(|e| match e {
+            ParserBuildEnvError::YaccGrammarErrors(errs) => {
+                let mut out = String::new();
+                out.push_str(&format!(
+                    "\n{ERROR}{}\n",
+                    yacc_diag.file_location_msg("", None)
+                ));
+                for e in errs {
+                    out.push_str(&indent("     ", &yacc_diag.format_error(e).to_string()));
+                    out.push('\n');
+                }
+                ErrorString(out)
+            }
+            e => ErrorString(e.to_string()),
+        })?;
         let grm = code_gen.grm();
-        let stable = code_gen.stable();
-
         let rule_ids = grm
             .tokens_map()
             .iter()
             .map(|(&n, &i)| (n.to_owned(), i.as_storaget()))
             .collect::<HashMap<_, _>>();
 
-        let cache = code_gen.cache_str(&src_env, &build_env);
+        let cache = code_gen.cache_str(&build_env);
 
         // We don't need to go through the full rigmarole of generating an output file if all of
         // the following are true: the output file exists; it is newer than the input file; and the
@@ -716,6 +748,35 @@ where
         // confusing than the alternatives).
         fs::remove_file(outp).ok();
 
+        let stable = code_gen.stable();
+        if self.error_on_conflicts
+            && let Some(c) = stable.conflicts()
+        {
+            match (grm.expect(), grm.expectrr()) {
+                (Some(i), Some(j)) if i == c.sr_len() && j == c.rr_len() => (),
+                (Some(i), None) if i == c.sr_len() && 0 == c.rr_len() => (),
+                (None, Some(j)) if 0 == c.sr_len() && j == c.rr_len() => (),
+                (None, None) if 0 == c.rr_len() && 0 == c.sr_len() => (),
+                _ => {
+                    let conflicts_diagnostic = yacc_diag.format_conflicts::<LexerTypesT>(
+                        grm,
+                        build_env.ast_with_validity_info().ast(),
+                        c,
+                        code_gen.sgraph(),
+                        stable,
+                    );
+                    #[cfg(test)]
+                    let (_, _, stable) = code_gen.finish();
+                    return Err(Box::new(CTConflictsError {
+                        conflicts_diagnostic,
+                        phantom: PhantomData,
+                        #[cfg(test)]
+                        stable,
+                    }));
+                }
+            }
+        }
+
         if let Some(ref mut inspector_rt) = self.inspect_rt {
             let rt: RTParserBuilder<'_, StorageT, LexerTypesT> = RTParserBuilder::new(grm, stable);
             let rt = if let Some(rk) = self.recoverer {
@@ -723,16 +784,17 @@ where
             } else {
                 rt
             };
-            inspector_rt(src_env.header_mut(), rt, &rule_ids, grmp)?
+            inspector_rt(build_env.header_mut(), rt, &rule_ids, grmp)?
         }
 
-        src_env.check_unused_header_keys()?;
+        build_env
+            .check_unused_header_keys()
+            .map_err(|e| ErrorString(e.to_string()))?;
 
         self.output_file(
             &code_gen,
             outp,
             &format!("/* CACHE INFORMATION {} */\n", cache),
-            &src_env,
             &build_env,
         )?;
         let (grm, sgraph, stable) = code_gen.finish();
@@ -861,10 +923,11 @@ where
         code_gen: &ParserCodegen<LexerTypesT>,
         outp_rs: P,
         cache: &str,
-        src_env: &ParserSrcEnv,
         build_env: &ParserBuildEnv<'_, LexerTypesT>,
     ) -> Result<(), Box<dyn Error>> {
-        let outs = code_gen.generate(src_env, build_env)?;
+        let outs = code_gen
+            .generate(build_env)
+            .map_err(|e| ErrorString(e.to_string()))?;
         let mut f = File::create(outp_rs)?;
         f.write_all(outs.as_bytes())?;
         f.write_all(cache.as_bytes())?;
@@ -1148,7 +1211,7 @@ A : 'a';"
                 let err_string = e.to_string();
                 assert_eq!(
                     err_string,
-                    "CTParserBuilder::mod_name(\"contains-a-dash_y\") is not a valid rust identifier due to 'unexpected token'"
+                    "mod_name \'contains-a-dash_y\' is not a valid rust identifier due to 'unexpected token'"
                 );
             }
         }
