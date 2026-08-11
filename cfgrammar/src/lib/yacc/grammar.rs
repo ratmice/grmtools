@@ -1573,13 +1573,13 @@ mod test {
             "%grmtools{yacckind: YaccKind::Original(yaccoriginalactionkind::useraction)}
                  %actiontype ()
                  %%
-                 Start: ;",
+                 Start: {};",
             "%grmtools{yacckind: Original(YACCOriginalActionKind::NoAction)}
                  %%
                  Start: ;",
             "%grmtools{yacckind: YaccKind::Grmtools}
                  %%
-                 Start -> () : ;",
+                 Start -> () : {};",
         ];
         for src in srcs {
             YaccGrammar::<u32>::from_str(src).unwrap();
@@ -1623,7 +1623,7 @@ mod test {
                     yacckind: YaccKind::Grmtools,
                 }
                 %%
-                Start -> () : ;
+                Start -> () : {};
             "#;
         YaccGrammar::<u32>::from_str(src).unwrap();
         let src = r#"
@@ -1631,7 +1631,7 @@ mod test {
                     yacckind: YaccKind::Grmtools
                 }
                 %%
-                Start -> () : ;
+                Start -> () : {};
             "#;
         YaccGrammar::<u32>::from_str(src).unwrap();
     }

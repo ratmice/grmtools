@@ -36,6 +36,8 @@ pub enum YaccGrammarErrorKind {
     IncompleteRule,
     IncompleteComment,
     IncompleteAction,
+    MissingActionCode,
+    MissingActionType,
     MissingColon,
     MissingRightArrow,
     MismatchedBrace,
@@ -57,6 +59,7 @@ pub enum YaccGrammarErrorKind {
     InvalidString,
     NoStartRule,
     UnknownSymbol,
+    UnrecognisedActionVariable,
     InvalidStartRule(String),
     UnknownRuleRef(String),
     UnknownToken(String),
@@ -97,6 +100,8 @@ impl fmt::Display for YaccGrammarErrorKind {
             YaccGrammarErrorKind::IncompleteRule => "Incomplete rule",
             YaccGrammarErrorKind::IncompleteComment => "Incomplete comment",
             YaccGrammarErrorKind::IncompleteAction => "Incomplete action",
+            YaccGrammarErrorKind::MissingActionCode => "Production is missing action code",
+            YaccGrammarErrorKind::MissingActionType => "Missing action type",
             YaccGrammarErrorKind::MissingColon => "Missing ':'",
             YaccGrammarErrorKind::MissingRightArrow => "Missing '->'",
             YaccGrammarErrorKind::MismatchedBrace => "Mismatched brace",
@@ -107,6 +112,9 @@ impl fmt::Display for YaccGrammarErrorKind {
             YaccGrammarErrorKind::UnknownDeclaration => "Unknown declaration",
             YaccGrammarErrorKind::DuplicatePrecedence => "Token has multiple precedences specified",
             YaccGrammarErrorKind::PrecNotFollowedByToken => "%prec not followed by token name",
+            YaccGrammarErrorKind::UnrecognisedActionVariable => {
+                "Unrecognised action variable following '$'"
+            }
             YaccGrammarErrorKind::DuplicateAvoidInsertDeclaration => {
                 "Duplicated %avoid_insert declaration"
             }
@@ -245,6 +253,8 @@ impl Spanned for YaccGrammarError {
             | YaccGrammarErrorKind::IncompleteRule
             | YaccGrammarErrorKind::IncompleteComment
             | YaccGrammarErrorKind::IncompleteAction
+            | YaccGrammarErrorKind::MissingActionCode
+            | YaccGrammarErrorKind::MissingActionType
             | YaccGrammarErrorKind::MissingColon
             | YaccGrammarErrorKind::MissingRightArrow
             | YaccGrammarErrorKind::MismatchedBrace
@@ -258,6 +268,7 @@ impl Spanned for YaccGrammarError {
             | YaccGrammarErrorKind::InvalidString
             | YaccGrammarErrorKind::NoStartRule
             | YaccGrammarErrorKind::UnknownSymbol
+            | YaccGrammarErrorKind::UnrecognisedActionVariable
             | YaccGrammarErrorKind::InvalidStartRule(_)
             | YaccGrammarErrorKind::UnknownRuleRef(_)
             | YaccGrammarErrorKind::UnknownToken(_)
@@ -286,7 +297,7 @@ pub(crate) struct YaccParser<'a> {
     global_actiontype: Option<(String, Span)>,
 }
 
-static RE_NAME: LazyLock<Regex> =
+pub(crate) static RE_NAME: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"^[a-zA-Z_.][a-zA-Z0-9_.]*").unwrap());
 static RE_TOKEN: LazyLock<Regex> =
     LazyLock::new(|| Regex::new("^(?:(\".+?\")|('.+?')|([a-zA-Z_][a-zA-Z_0-9]*))").unwrap());
@@ -842,7 +853,7 @@ impl YaccParser<'_> {
             Err(self.mk_error(YaccGrammarErrorKind::IncompleteAction, i))
         } else {
             debug_assert!(self.lookahead_is("}", j).is_some());
-            let s = self.src[i + '{'.len_utf8()..j].trim().to_string();
+            let s = self.src[i + '{'.len_utf8()..j].to_string();
             Ok((j + '}'.len_utf8(), s))
         }
     }
@@ -2287,12 +2298,12 @@ x"
           ",
         )
         .unwrap();
-        let action_str = "println!(\"test\");".to_string();
+        let action_str = " println!(\"test\"); ".to_string();
         assert_eq!(
             grm.prods[grm.rules["A"].pidxs[0]].action,
             Some((action_str.clone(), Span::new(34, 34 + action_str.len())))
         );
-        let action_str = "add($1, $2);".to_string();
+        let action_str = " add($1, $2); ".to_string();
         assert_eq!(
             grm.prods[grm.rules["B"].pidxs[0]].action,
             Some((action_str.clone(), Span::new(90, 90 + action_str.len())))

@@ -15,6 +15,7 @@ use super::{
 use crate::{
     Span,
     header::{GrmtoolsSectionParser, HeaderError, HeaderErrorKind, HeaderValue},
+    yacc::YaccOriginalActionKind,
 };
 
 /// Any error from the Yacc parser returns an instance of this struct.
@@ -55,7 +56,9 @@ impl ASTWithValidityInfo {
             let mut yp = YaccParser::new(yacc_kind, s);
             yp.parse().map_err(|e| errs.extend(e)).ok();
             let mut ast = yp.build();
-            ast.complete_and_validate().map_err(|e| errs.push(e)).ok();
+            ast.complete_and_validate(Some(yacc_kind))
+                .map_err(|e| errs.push(e))
+                .ok();
             ast
         };
         ASTWithValidityInfo {
@@ -122,7 +125,9 @@ impl FromStr for ASTWithValidityInfo {
                 let mut yp = YaccParser::new(yacc_kind, src);
                 yp.parse().map_err(|e| errs.extend(e)).ok();
                 let mut ast = yp.build();
-                ast.complete_and_validate().map_err(|e| errs.push(e)).ok();
+                ast.complete_and_validate(Some(yacc_kind))
+                    .map_err(|e| errs.push(e))
+                    .ok();
                 ast
             };
             Ok(ASTWithValidityInfo {
@@ -305,9 +310,19 @@ impl GrammarAST {
     ///   3) Every token reference references a declared token
     ///   4) If a production has a precedence token, then it references a declared token
     ///   5) Every token declared with %epp matches a known token
-    ///
-    /// If the validation succeeds, None is returned.
-    pub(crate) fn complete_and_validate(&mut self) -> Result<(), YaccGrammarError> {
+    ///   6) If `yacc_kind` is specified, perform any kind specific validation.
+    ///      * If the kind requires an action type, check that each rule has one
+    ///      * That each production has action code
+    ///      * That `$` variables referred to in action code are recognised.
+    pub(crate) fn complete_and_validate(
+        &mut self,
+        yacc_kind: Option<YaccKind>,
+    ) -> Result<(), YaccGrammarError> {
+        let kind_requires_action_checks = matches!(
+            yacc_kind,
+            Some(YaccKind::Original(YaccOriginalActionKind::UserAction)) | Some(YaccKind::Grmtools)
+        );
+
         match self.start {
             None => {
                 return Err(YaccGrammarError {
@@ -325,8 +340,48 @@ impl GrammarAST {
             }
         }
         for rule in self.rules.values() {
+            if kind_requires_action_checks && rule.actiont.is_none() {
+                return Err(YaccGrammarError {
+                    kind: YaccGrammarErrorKind::MissingActionType,
+                    spans: vec![rule.name.1],
+                });
+            }
             for &pidx in &rule.pidxs {
                 let prod = &self.prods[pidx];
+                if kind_requires_action_checks {
+                    if let Some((action_code, action_span)) = prod.action.as_ref() {
+                        let mut last = 0;
+                        while let Some(off) = action_code[last..].find('$') {
+                            if !(action_code[last + off..].starts_with("$$")
+                                || action_code[last + off..].starts_with("$lexer")
+                                || action_code[last + off..].starts_with("$span")
+                                || (last + off + 1 < action_code.len()
+                                    && action_code[last + off + 1..]
+                                        .starts_with(|c: char| c.is_numeric())))
+                            {
+                                // Starting from the `$` find the end of a variable name, otherwise default to the span of the `$`
+                                let m = crate::yacc::parser::RE_NAME
+                                    .find(&action_code[last + off + 1..]);
+                                let var_start_pos = action_span.start() + last + off;
+                                let var_end_pos = m
+                                    .map(|m| var_start_pos + 1 + m.end())
+                                    .unwrap_or(var_start_pos + 1);
+                                return Err(YaccGrammarError {
+                                    kind: YaccGrammarErrorKind::UnrecognisedActionVariable,
+                                    spans: vec![Span::new(var_start_pos, var_end_pos)],
+                                });
+                            } else {
+                                last = last + off + 2;
+                            }
+                        }
+                    } else {
+                        return Err(YaccGrammarError {
+                            kind: YaccGrammarErrorKind::MissingActionCode,
+                            spans: vec![prod.prod_span],
+                        });
+                    }
+                }
+
                 if let Some(ref n) = prod.precedence {
                     if !self.tokens.contains(n) {
                         return Err(YaccGrammarError {
@@ -508,7 +563,7 @@ mod test {
     #[test]
     fn test_empty_grammar() {
         let mut grm = GrammarAST::new();
-        match grm.complete_and_validate() {
+        match grm.complete_and_validate(None) {
             Err(YaccGrammarError {
                 kind: YaccGrammarErrorKind::NoStartRule,
                 ..
@@ -524,7 +579,7 @@ mod test {
         grm.start = Some(("A".to_string(), empty_span));
         grm.add_rule(("B".to_string(), empty_span), None);
         grm.add_prod("B".to_string(), vec![], None, None, empty_span);
-        match grm.complete_and_validate() {
+        match grm.complete_and_validate(None) {
             Err(YaccGrammarError {
                 kind: YaccGrammarErrorKind::InvalidStartRule(_),
                 ..
@@ -540,7 +595,7 @@ mod test {
         grm.start = Some(("A".to_string(), empty_span));
         grm.add_rule(("A".to_string(), empty_span), None);
         grm.add_prod("A".to_string(), vec![], None, None, empty_span);
-        assert!(grm.complete_and_validate().is_ok());
+        assert!(grm.complete_and_validate(None).is_ok());
     }
 
     #[test]
@@ -552,7 +607,7 @@ mod test {
         grm.add_rule(("B".to_string(), empty_span), None);
         grm.add_prod("A".to_string(), vec![rule("B")], None, None, empty_span);
         grm.add_prod("B".to_string(), vec![], None, None, empty_span);
-        assert!(grm.complete_and_validate().is_ok());
+        assert!(grm.complete_and_validate(None).is_ok());
     }
 
     #[test]
@@ -562,7 +617,7 @@ mod test {
         grm.start = Some(("A".to_string(), empty_span));
         grm.add_rule(("A".to_string(), empty_span), None);
         grm.add_prod("A".to_string(), vec![rule("B")], None, None, empty_span);
-        match grm.complete_and_validate() {
+        match grm.complete_and_validate(None) {
             Err(YaccGrammarError {
                 kind: YaccGrammarErrorKind::UnknownRuleRef(_),
                 ..
@@ -579,7 +634,7 @@ mod test {
         grm.start = Some(("A".to_string(), empty_span));
         grm.add_rule(("A".to_string(), empty_span), None);
         grm.add_prod("A".to_string(), vec![token("b")], None, None, empty_span);
-        assert!(grm.complete_and_validate().is_ok());
+        assert!(grm.complete_and_validate(None).is_ok());
     }
 
     #[test]
@@ -592,7 +647,7 @@ mod test {
         grm.start = Some(("A".to_string(), empty_span));
         grm.add_rule(("A".to_string(), empty_span), None);
         grm.add_prod("A".to_string(), vec![rule("b")], None, None, empty_span);
-        assert!(grm.complete_and_validate().is_err());
+        assert!(grm.complete_and_validate(None).is_err());
     }
 
     #[test]
@@ -602,7 +657,7 @@ mod test {
         grm.start = Some(("A".to_string(), empty_span));
         grm.add_rule(("A".to_string(), empty_span), None);
         grm.add_prod("A".to_string(), vec![token("b")], None, None, empty_span);
-        match grm.complete_and_validate() {
+        match grm.complete_and_validate(None) {
             Err(YaccGrammarError {
                 kind: YaccGrammarErrorKind::UnknownToken(_),
                 ..
@@ -624,7 +679,7 @@ mod test {
             None,
             Span::new(0, 2),
         );
-        match grm.complete_and_validate() {
+        match grm.complete_and_validate(None) {
             Err(YaccGrammarError {
                 kind: YaccGrammarErrorKind::UnknownRuleRef(_),
                 ..
@@ -642,7 +697,7 @@ mod test {
         grm.add_prod("A".to_string(), vec![], None, None, empty_span);
         grm.epp
             .insert("k".to_owned(), (empty_span, ("v".to_owned(), empty_span)));
-        match grm.complete_and_validate() {
+        match grm.complete_and_validate(None) {
             Err(YaccGrammarError {
                 kind: YaccGrammarErrorKind::UnknownEPP(_),
                 spans,
@@ -675,7 +730,7 @@ mod test {
             None,
             empty_span,
         );
-        assert!(grm.complete_and_validate().is_ok());
+        assert!(grm.complete_and_validate(None).is_ok());
     }
 
     #[test]
@@ -691,7 +746,7 @@ mod test {
             None,
             empty_span,
         );
-        match grm.complete_and_validate() {
+        match grm.complete_and_validate(None) {
             Err(YaccGrammarError {
                 kind: YaccGrammarErrorKind::UnknownToken(_),
                 ..
@@ -699,7 +754,7 @@ mod test {
             _ => panic!("Validation error"),
         }
         grm.tokens.insert("b".to_string());
-        match grm.complete_and_validate() {
+        match grm.complete_and_validate(None) {
             Err(YaccGrammarError {
                 kind: YaccGrammarErrorKind::NoPrecForToken(_),
                 ..
@@ -735,7 +790,6 @@ mod test {
     #[test]
     fn token_rule_confusion_issue_557() {
         use super::*;
-        use crate::yacc::*;
         let ast_validity = ASTWithValidityInfo::new(
             YaccKind::Original(YaccOriginalActionKind::GenericParseTree),
             r#"
@@ -783,7 +837,6 @@ mod test {
     #[test]
     fn test_token_directives() {
         use super::*;
-        use crate::yacc::*;
 
         // Testing that `%token a` after `%left "a"` still ends up in
         let ast_validity = ASTWithValidityInfo::new(
@@ -813,7 +866,6 @@ mod test {
     #[test]
     fn clone_ast_changing_start_rule() {
         use super::*;
-        use crate::yacc::*;
         let y_src = r#"
         %start AStart
         %token A B C
@@ -833,6 +885,103 @@ mod test {
         assert_eq!(
             bstart_ast_validity.ast().start.as_ref(),
             Some(&bstart_rule.name)
+        );
+    }
+
+    #[test]
+    fn test_missing_actiont() {
+        use super::*;
+        let ast_validity = ASTWithValidityInfo::new(
+            YaccKind::Original(YaccOriginalActionKind::UserAction),
+            r#"
+%token a
+%%
+start: "a";
+"#,
+        );
+        assert_eq!(
+            ast_validity.errors(),
+            vec![YaccGrammarError {
+                kind: YaccGrammarErrorKind::MissingActionType,
+                spans: vec![Span::new(13, 18)],
+            }]
+        );
+
+        let ast_validity = ASTWithValidityInfo::new(
+            YaccKind::Original(YaccOriginalActionKind::UserAction),
+            r#"
+%actiontype ()
+%token a
+%%
+start: "a" { };
+"#,
+        );
+        assert!(ast_validity.errors().is_empty());
+
+        let mut grm = GrammarAST::new();
+        let empty_span = Span::new(0, 0);
+        let rule_span = Span::new(255, 255);
+        grm.start = Some(("A".to_string(), empty_span));
+        grm.add_rule(("A".to_string(), rule_span), None);
+        grm.add_prod("A".to_string(), vec![], None, None, empty_span);
+        assert_eq!(
+            grm.complete_and_validate(Some(YaccKind::Grmtools)),
+            Err(YaccGrammarError {
+                kind: YaccGrammarErrorKind::MissingActionType,
+                spans: vec![rule_span],
+            })
+        );
+    }
+
+    #[test]
+    fn test_unrecognized_action_variable() {
+        use super::*;
+        let ast_validity = ASTWithValidityInfo::new(
+            YaccKind::Grmtools,
+            r#"
+%token a
+%%
+start -> () : "a" { $foo; };
+"#,
+        );
+        assert_eq!(
+            ast_validity.errors(),
+            vec![YaccGrammarError {
+                kind: YaccGrammarErrorKind::UnrecognisedActionVariable,
+                spans: vec![Span::new(33, 37)],
+            }]
+        );
+
+        let ast_validity = ASTWithValidityInfo::new(
+            YaccKind::Grmtools,
+            r#"
+%token a
+%%
+start -> () : "a" {$};
+"#,
+        );
+        assert_eq!(
+            ast_validity.errors(),
+            vec![YaccGrammarError {
+                kind: YaccGrammarErrorKind::UnrecognisedActionVariable,
+                spans: vec![Span::new(32, 33)],
+            }]
+        );
+
+        let ast_validity = ASTWithValidityInfo::new(
+            YaccKind::Grmtools,
+            r#"
+%token a
+%%
+start -> () : "a" {$;;;; };
+"#,
+        );
+        assert_eq!(
+            ast_validity.errors(),
+            vec![YaccGrammarError {
+                kind: YaccGrammarErrorKind::UnrecognisedActionVariable,
+                spans: vec![Span::new(32, 33)],
+            }]
         );
     }
 }
