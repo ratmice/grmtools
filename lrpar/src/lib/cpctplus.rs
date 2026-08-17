@@ -336,34 +336,13 @@ where
     }
 
     fn shift(&self, n: &PathFNode<StorageT>, nbrs: &mut Vec<(u16, PathFNode<StorageT>)>) {
-        // Forward move rule (ER3)
-        //
-        // Note the rule in Corchuelo et al. is confusing and, I think, wrong. It reads:
-        //   (S, I) \rightarrow_{LR*} (S', I')
-        //   \wedge (j = N \vee 0 < j < N \wedge f(q_r, t_{j + 1} \in {accept, error})
-        // First I think the bracketing would be clearer if written as:
-        //   j = N \vee (0 < j < N \wedge f(q_r, t_{j + 1} \in {accept, error})
-        // And I think the condition should be:
-        //   j = N \vee (0 <= j < N \wedge f(q_r, t_{j + 1} \in {accept, error})
-        // because there's no reason that any symbols need to be shifted in order for an accept
-        // (or, indeed an error) state to be reached.
-        //
-        // So the full rule should, I think, be:
-        //   (S, I) \rightarrow_{LR*} (S', I')
-        //   \wedge (j = N \vee (0 <= j < N \wedge f(q_r, t_{j + 1} \in {accept, error}))
-        //
-        // That said, as KimYi somewhat obliquely mention, generating multiple shifts in one go is
-        // a bad idea: it means that we miss out on some minimal cost repairs. Instead, we should
-        // only generate one shift at a time. So the adjusted rule we implement is:
-        //
-        //   (S, I) \rightarrow_{LR*} (S', I')
-        //   \wedge 0 <= j < 1 \wedge S != S'
+        // This is CR Shift 3 from "Don't Panic!".
 
         let laidx = n.laidx;
         let (new_laidx, n_pstack) =
             self.parser
                 .lr_cactus(None, laidx, laidx + 1, n.pstack.clone(), &mut None);
-        if n.pstack != n_pstack {
+        if new_laidx > laidx || n.pstack != n_pstack {
             let n_repairs = if new_laidx > laidx {
                 n.repairs.child(RepairMerge::Repair(Repair::Shift))
             } else {
@@ -782,6 +761,28 @@ E : 'N'
         assert_eq!(errs.len(), 2);
         check_all_repairs(&grm, &lex, &errs[0], &[r#"Insert "N""#, r#"Delete "+""#]);
         check_all_repairs(&grm, &lex, &errs[1], &[r#"Insert ")""#]);
+    }
+
+    #[test]
+    fn stack_need_not_advance() {
+        let lexs = "
+a 'A'
+b 'B'
+x 'X'
+";
+        let grms = r#"
+%start S
+%expect-unused Unmatched "X"
+%%
+S: As "B" ;
+As: As "A" | "A" ;
+Unmatched: "X" ;
+"#;
+
+        let us = "xaaab";
+        let (grm, lex, pr) = do_parse(RecoveryKind::CPCTPlus, lexs, grms, us);
+        let (_, errs) = pr.unwrap_err();
+        check_all_repairs(&grm, &lex, &errs[0], &[r#"Delete "x""#]);
     }
 
     #[test]
