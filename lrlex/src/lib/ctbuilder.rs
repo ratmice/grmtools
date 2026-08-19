@@ -13,8 +13,6 @@ use lrpar::{
 use num_traits::{AsPrimitive, PrimInt, Unsigned};
 use proc_macro2::{Ident, TokenStream};
 use quote::{ToTokens, TokenStreamExt, format_ident, quote};
-use regex::Regex;
-use std::marker::PhantomData;
 use std::{
     any::type_name,
     borrow::Borrow,
@@ -25,6 +23,7 @@ use std::{
     fs::{self, File, create_dir_all, read_to_string},
     hash::Hash,
     io::Write,
+    marker::PhantomData,
     path::{Path, PathBuf},
     sync::{LazyLock, Mutex},
 };
@@ -39,9 +38,6 @@ const RUST_FILE_EXT: &str = "rs";
 
 const ERROR: &str = "[Error]";
 const WARNING: &str = "[Warning]";
-
-static RE_TOKEN_ID: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"^[a-zA-Z_][a-zA-Z_0-9]*$").unwrap());
 
 static GENERATED_PATHS: LazyLock<Mutex<HashSet<PathBuf>>> =
     LazyLock::new(|| Mutex::new(HashSet::new()));
@@ -721,25 +717,7 @@ where
         // Code gen for the lexerdef() return value referencing variables bound earlier.
         lexerdef_func_impl.append_all(code_gen.gen_instantiate_lexerdef(&build_env));
         let lexerdef_ty = code_gen.gen_lexerdef_ty(&build_env);
-
-        let mut token_consts = TokenStream::new();
-        if let Some(rim) = code_gen.rule_ids_map() {
-            let mut rim_sorted = Vec::from_iter(rim.iter());
-            rim_sorted.sort_by_key(|(k, _)| *k);
-            for (name, id) in rim_sorted {
-                if RE_TOKEN_ID.is_match(name) {
-                    let tok_ident = format_ident!("N_{}", name.to_ascii_uppercase());
-                    let storaget =
-                        str::parse::<TokenStream>(type_name::<LexerTypesT::StorageT>()).unwrap();
-                    // Code gen for the constant token values.
-                    let tok_const = quote! {
-                        #[allow(dead_code)]
-                        pub const #tok_ident: #storaget = #id;
-                    };
-                    token_consts.extend(tok_const)
-                }
-            }
-        }
+        let token_consts = code_gen.gen_token_consts();
         let token_consts = token_consts.into_iter();
         let out_tokens = {
             let lexerdef_param = str::parse::<TokenStream>(type_name::<LexerTypesT>()).unwrap();

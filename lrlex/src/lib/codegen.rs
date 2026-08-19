@@ -7,8 +7,14 @@ use lrpar::LexerTypes;
 
 use crate::{LRNonStreamingLexerDef, LexBuildError, LexFlags, LexerDef, LexerKind};
 use proc_macro2::{Ident, TokenStream};
-use quote::{ToTokens, TokenStreamExt, quote};
-use std::{collections::HashMap, fmt, marker::PhantomData, path::Path};
+use quote::{ToTokens, TokenStreamExt, format_ident, quote};
+use regex::Regex;
+use std::{
+    any::type_name, collections::HashMap, fmt, marker::PhantomData, path::Path, sync::LazyLock,
+};
+
+static RE_TOKEN_ID: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"^[a-zA-Z_][a-zA-Z_0-9]*$").unwrap());
 
 pub(crate) enum LexerSrcEnvError {
     GrmtoolsSectionParseError(Vec<HeaderError<Span>>),
@@ -392,6 +398,28 @@ where
         quote! {
             #lexerdef_ty::from_rules(start_states, rules)
         }
+    }
+
+    pub(crate) fn gen_token_consts(&self) -> TokenStream {
+        let mut token_consts = TokenStream::new();
+        if let Some(rim) = self.rule_ids_map() {
+            let mut rim_sorted = Vec::from_iter(rim.iter());
+            rim_sorted.sort_by_key(|(k, _)| *k);
+            for (name, id) in rim_sorted {
+                if RE_TOKEN_ID.is_match(name) {
+                    let tok_ident = format_ident!("N_{}", name.to_ascii_uppercase());
+                    let storaget =
+                        str::parse::<TokenStream>(type_name::<LexerTypesT::StorageT>()).unwrap();
+                    // Code gen for the constant token values.
+                    let tok_const = quote! {
+                        #[allow(dead_code)]
+                        pub const #tok_ident: #storaget = #id;
+                    };
+                    token_consts.extend(tok_const)
+                }
+            }
+        }
+        token_consts
     }
 }
 
