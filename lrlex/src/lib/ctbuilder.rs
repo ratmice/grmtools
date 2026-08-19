@@ -709,23 +709,9 @@ where
             fs::remove_file(outp).ok();
             panic!();
         }
-
-        // Try and run a code formatter on the generated code.
-        let unformatted = code_gen
-            .generate_lex_module(&build_env)
-            .map_err(|e| ErrorString(e.to_string()))?
-            .to_string();
-        let mut outs = String::new();
-        // Record the time that this version of lrlex was built. If the source code changes and rustc
-        // forces a recompile, this will change this value, causing anything which depends on this
-        // build of lrlex to be recompiled too.
-        let timestamp = env!("VERGEN_BUILD_TIMESTAMP");
-        write!(outs, "// lrlex build time: {}\n\n", quote!(#timestamp),).ok();
-        outs.push_str(
-            &syn::parse_str(&unformatted)
-                .map(|syntax_tree| prettyplease::unparse(&syntax_tree))
-                .unwrap_or(unformatted),
-        );
+        let outs = code_gen
+            .generate(&build_env)
+            .map_err(|e| ErrorString(e.to_string()))?;
         // If the file we're about to write out already exists with the same contents, then we
         // don't overwrite it (since that will force a recompile of the file, and relinking of the
         // binary etc).

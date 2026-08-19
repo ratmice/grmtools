@@ -10,7 +10,12 @@ use proc_macro2::{Ident, TokenStream};
 use quote::{ToTokens, TokenStreamExt, format_ident, quote};
 use regex::Regex;
 use std::{
-    any::type_name, collections::HashMap, fmt, marker::PhantomData, path::Path, sync::LazyLock,
+    any::type_name,
+    collections::HashMap,
+    fmt::{self, Write as _},
+    marker::PhantomData,
+    path::Path,
+    sync::LazyLock,
 };
 
 static RE_TOKEN_ID: LazyLock<Regex> =
@@ -119,7 +124,6 @@ where
     usize: num_traits::AsPrimitive<LexerTypesT::StorageT>,
 {
     rule_ids_map: Option<HashMap<String, LexerTypesT::StorageT>>,
-    #[expect(unused)]
     timestamp: String,
 }
 
@@ -458,6 +462,26 @@ where
                 #(#token_consts)*
             }
         })
+    }
+
+    pub(crate) fn generate(
+        &self,
+        build_env: &LexerBuildEnv<LexerTypesT>,
+    ) -> Result<String, LexerCodegenError> {
+        // Try and run a code formatter on the generated code.
+        let unformatted = self.generate_lex_module(build_env)?.to_string();
+        let mut outs = String::new();
+        // Record the time that this version of lrlex was built. If the source code changes and rustc
+        // forces a recompile, this will change this value, causing anything which depends on this
+        // build of lrlex to be recompiled too.
+        let timestamp = &self.timestamp;
+        write!(outs, "// lrlex build time: {}\n\n", quote!(#timestamp),).ok();
+        outs.push_str(
+            &syn::parse_str(&unformatted)
+                .map(|syntax_tree| prettyplease::unparse(&syntax_tree))
+                .unwrap_or(unformatted),
+        );
+        Ok(outs)
     }
 }
 
