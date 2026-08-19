@@ -375,6 +375,24 @@ where
             let start_states: Vec<StartState> = vec![#(#start_states),*];
         }
     }
+
+    pub(crate) fn gen_lexerdef_ty(&self, build_env: &LexerBuildEnv<LexerTypesT>) -> TokenStream {
+        match build_env.lexerkind() {
+            LexerKind::LRNonStreamingLexer => {
+                quote!(::lrlex::LRNonStreamingLexerDef)
+            }
+        }
+    }
+
+    pub(crate) fn gen_instantiate_lexerdef(
+        &self,
+        build_env: &LexerBuildEnv<LexerTypesT>,
+    ) -> TokenStream {
+        let lexerdef_ty = self.gen_lexerdef_ty(build_env);
+        quote! {
+            #lexerdef_ty::from_rules(start_states, rules)
+        }
+    }
 }
 
 /// The quote impl of `ToTokens` for `Option` prints an empty string for `None`

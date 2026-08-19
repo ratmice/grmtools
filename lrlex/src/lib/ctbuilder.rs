@@ -718,15 +718,9 @@ where
         let mut lexerdef_func_impl = code_gen.gen_lex_flags_decl(&build_env);
         lexerdef_func_impl.append_all(code_gen.gen_start_states_val(&build_env));
         lexerdef_func_impl.append_all(code_gen.gen_rules_val(&build_env));
-        let lexerdef_ty = match build_env.lexerkind() {
-            LexerKind::LRNonStreamingLexer => {
-                quote!(::lrlex::LRNonStreamingLexerDef)
-            }
-        };
         // Code gen for the lexerdef() return value referencing variables bound earlier.
-        lexerdef_func_impl.append_all(quote! {
-            #lexerdef_ty::from_rules(start_states, rules)
-        });
+        lexerdef_func_impl.append_all(code_gen.gen_instantiate_lexerdef(&build_env));
+        let lexerdef_ty = code_gen.gen_lexerdef_ty(&build_env);
 
         let mut token_consts = TokenStream::new();
         if let Some(rim) = code_gen.rule_ids_map() {
