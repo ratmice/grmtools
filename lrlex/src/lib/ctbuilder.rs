@@ -12,7 +12,7 @@ use lrpar::{
 };
 use num_traits::{AsPrimitive, PrimInt, Unsigned};
 use proc_macro2::{Ident, TokenStream};
-use quote::{ToTokens, TokenStreamExt, format_ident, quote};
+use quote::{ToTokens, format_ident, quote};
 use std::{
     any::type_name,
     borrow::Borrow,
@@ -457,7 +457,8 @@ where
         let lex_diag = SpannedDiagnosticFormatter::new(&lex_src, lexerp);
         let args = LexerBuildEnvArgs::new()
             .mod_name(self.mod_name.map(|s| s.to_string()))
-            .lexerkind(self.lexerkind);
+            .lexerkind(self.lexerkind)
+            .visibility(self.visibility);
         let mut build_env =
             LexerSrcEnv::<LexerTypesT>::new_with_header(&lex_src, Some(lexerp), self.header)
                 .build_env(args)
@@ -708,35 +709,12 @@ where
             fs::remove_file(outp).ok();
             panic!();
         }
-        let mod_name = code_gen
-            .gen_mod_name(&build_env)
-            .map_err(|e| ErrorString(e.to_string()))?;
-        let mut lexerdef_func_impl = code_gen.gen_lex_flags_decl(&build_env);
-        lexerdef_func_impl.append_all(code_gen.gen_start_states_val(&build_env));
-        lexerdef_func_impl.append_all(code_gen.gen_rules_val(&build_env));
-        // Code gen for the lexerdef() return value referencing variables bound earlier.
-        lexerdef_func_impl.append_all(code_gen.gen_instantiate_lexerdef(&build_env));
-        let lexerdef_ty = code_gen.gen_lexerdef_ty(&build_env);
-        let token_consts = code_gen.gen_token_consts();
-        let token_consts = token_consts.into_iter();
-        let out_tokens = {
-            let lexerdef_param = str::parse::<TokenStream>(type_name::<LexerTypesT>()).unwrap();
-            let mod_vis = self.visibility;
-            // Code gen for the generated module.
-            quote! {
-                #mod_vis mod #mod_name {
-                    use ::lrlex::{LexerDef, Rule, StartState};
-                    #[allow(dead_code)]
-                    pub fn lexerdef() -> #lexerdef_ty<#lexerdef_param> {
-                        #lexerdef_func_impl
-                    }
 
-                    #(#token_consts)*
-                }
-            }
-        };
         // Try and run a code formatter on the generated code.
-        let unformatted = out_tokens.to_string();
+        let unformatted = code_gen
+            .generate_lex_module(&build_env)
+            .map_err(|e| ErrorString(e.to_string()))?
+            .to_string();
         let mut outs = String::new();
         // Record the time that this version of lrlex was built. If the source code changes and rustc
         // forces a recompile, this will change this value, causing anything which depends on this

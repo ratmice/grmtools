@@ -5,7 +5,7 @@ use cfgrammar::{
 };
 use lrpar::LexerTypes;
 
-use crate::{LRNonStreamingLexerDef, LexBuildError, LexFlags, LexerDef, LexerKind};
+use crate::{LRNonStreamingLexerDef, LexBuildError, LexFlags, LexerDef, LexerKind, Visibility};
 use proc_macro2::{Ident, TokenStream};
 use quote::{ToTokens, TokenStreamExt, format_ident, quote};
 use regex::Regex;
@@ -72,6 +72,7 @@ where
 pub(crate) struct LexerBuildEnvArgs {
     mod_name: Option<String>,
     lexerkind: Option<LexerKind>,
+    visibility: Visibility,
 }
 
 impl LexerBuildEnvArgs {
@@ -79,6 +80,7 @@ impl LexerBuildEnvArgs {
         Self {
             mod_name: None,
             lexerkind: None,
+            visibility: Visibility::Private,
         }
     }
 
@@ -89,6 +91,11 @@ impl LexerBuildEnvArgs {
 
     pub(crate) fn lexerkind(mut self, lexerkind: Option<LexerKind>) -> Self {
         self.lexerkind = lexerkind;
+        self
+    }
+
+    pub(crate) fn visibility(mut self, visibility: Visibility) -> Self {
+        self.visibility = visibility;
         self
     }
 }
@@ -102,6 +109,7 @@ where
     lexerkind: LexerKind,
     header: Header<Location>,
     lex_flags: LexFlags,
+    visibility: Visibility,
     lexerdef: LRNonStreamingLexerDef<LexerTypesT>,
 }
 
@@ -111,7 +119,7 @@ where
     usize: num_traits::AsPrimitive<LexerTypesT::StorageT>,
 {
     rule_ids_map: Option<HashMap<String, LexerTypesT::StorageT>>,
-    #[expect(dead_code)]
+    #[expect(unused)]
     timestamp: String,
 }
 
@@ -209,6 +217,7 @@ where
         Ok(LexerBuildEnv {
             mod_name,
             lexerkind,
+            visibility: args.visibility,
             header: self.header,
             lex_flags,
             lexerdef,
@@ -420,6 +429,35 @@ where
             }
         }
         token_consts
+    }
+
+    pub(crate) fn generate_lex_module(
+        &self,
+        build_env: &LexerBuildEnv<LexerTypesT>,
+    ) -> Result<TokenStream, LexerCodegenError> {
+        let mod_name = self.gen_mod_name(build_env)?;
+        let mut lexerdef_func_impl = self.gen_lex_flags_decl(build_env);
+        lexerdef_func_impl.append_all(self.gen_start_states_val(build_env));
+        lexerdef_func_impl.append_all(self.gen_rules_val(build_env));
+        // Code gen for the lexerdef() return value referencing variables bound earlier.
+        lexerdef_func_impl.append_all(self.gen_instantiate_lexerdef(build_env));
+        let lexerdef_ty = self.gen_lexerdef_ty(build_env);
+        let token_consts = self.gen_token_consts();
+        let token_consts = token_consts.into_iter();
+        let lexerdef_param = str::parse::<TokenStream>(type_name::<LexerTypesT>()).unwrap();
+        let mod_vis = &build_env.visibility;
+        // Code gen for the generated module.
+        Ok(quote! {
+            #mod_vis mod #mod_name {
+                use ::lrlex::{LexerDef, Rule, StartState};
+                #[allow(dead_code)]
+                pub fn lexerdef() -> #lexerdef_ty<#lexerdef_param> {
+                    #lexerdef_func_impl
+                }
+
+                #(#token_consts)*
+            }
+        })
     }
 }
 
