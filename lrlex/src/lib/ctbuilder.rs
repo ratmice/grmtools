@@ -173,44 +173,6 @@ pub enum RustEdition {
     Rust2021,
 }
 
-/// The quote impl of `ToTokens` for `Option` prints an empty string for `None`
-/// and the inner value for `Some(inner_value)`.
-///
-/// This wrapper instead emits both `Some` and `None` variants.
-/// See: [quote #20](https://github.com/dtolnay/quote/issues/20)
-// FIXME Remove in the next patch.
-struct QuoteOption<T>(Option<T>);
-
-impl<T: ToTokens> ToTokens for QuoteOption<T> {
-    fn to_tokens(&self, tokens: &mut TokenStream) {
-        tokens.append_all(match self.0 {
-            Some(ref t) => quote! { ::std::option::Option::Some(#t) },
-            None => quote! { ::std::option::Option::None },
-        });
-    }
-}
-
-/// This wrapper adds a missing impl of `ToTokens` for tuples.
-/// For a tuple `(a, b)` emits `(a.to_tokens(), b.to_tokens())`
-struct QuoteTuple<T>(T);
-
-impl<A: ToTokens, B: ToTokens> ToTokens for QuoteTuple<(A, B)> {
-    fn to_tokens(&self, tokens: &mut TokenStream) {
-        let (a, b) = &self.0;
-        tokens.append_all(quote!((#a, #b)));
-    }
-}
-
-/// The wrapped `&str` value will be emitted with a call to `to_string()`
-struct QuoteToString<'a>(&'a str);
-
-impl ToTokens for QuoteToString<'_> {
-    fn to_tokens(&self, tokens: &mut TokenStream) {
-        let x = &self.0;
-        tokens.append_all(quote! { #x.to_string() });
-    }
-}
-
 /// A string which uses `Display` for it's `Debug` impl.
 struct ErrorString(String);
 impl fmt::Display for ErrorString {
@@ -754,32 +716,8 @@ where
             .gen_mod_name(&build_env)
             .map_err(|e| ErrorString(e.to_string()))?;
         let mut lexerdef_func_impl = code_gen.gen_lex_flags_decl(&build_env);
-        {
-            let start_states = lexerdef.iter_start_states();
-            let rules = lexerdef.iter_rules().map(|r| {
-                    let tok_id = QuoteOption(r.tok_id);
-                    let n = QuoteOption(r.name().map(QuoteToString));
-                    let target_state =
-                        QuoteOption(r.target_state().map(|(x, y)| QuoteTuple((x, y))));
-                    let n_span = r.name_span();
-                    let regex = QuoteToString(&r.re_str);
-                    let start_states = r.start_states();
-                    // Code gen to construct a rule.
-                    //
-                    // We cannot `impl ToToken for Rule` because `Rule` never stores `lex_flags`,
-                    // Thus we reference the local lex_flags variable bound earlier.
-                    quote! {
-                        Rule::new(::lrlex::unstable_api::InternalPublicApi, #tok_id, #n, #n_span, #regex,
-                                vec![#(#start_states),*], #target_state, &lex_flags).unwrap()
-                    }
-                });
-            // Code gen for `lexerdef()`s rules and the stack of `start_states`.
-            lexerdef_func_impl.append_all(quote! {
-                let start_states: Vec<StartState> = vec![#(#start_states),*];
-                let rules = vec![#(#rules),*];
-            });
-        }
-
+        lexerdef_func_impl.append_all(code_gen.gen_start_states_val(&build_env));
+        lexerdef_func_impl.append_all(code_gen.gen_rules_val(&build_env));
         let lexerdef_ty = match build_env.lexerkind() {
             LexerKind::LRNonStreamingLexer => {
                 quote!(::lrlex::LRNonStreamingLexerDef)

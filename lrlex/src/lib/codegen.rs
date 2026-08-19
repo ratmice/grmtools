@@ -5,7 +5,7 @@ use cfgrammar::{
 };
 use lrpar::LexerTypes;
 
-use crate::{LRNonStreamingLexerDef, LexBuildError, LexFlags, LexerKind};
+use crate::{LRNonStreamingLexerDef, LexBuildError, LexFlags, LexerDef, LexerKind};
 use proc_macro2::{Ident, TokenStream};
 use quote::{ToTokens, TokenStreamExt, quote};
 use std::{collections::HashMap, fmt, marker::PhantomData, path::Path};
@@ -278,7 +278,7 @@ impl<LexerTypesT> LexerCodegen<LexerTypesT>
 where
     LexerTypesT: LexerTypes,
     usize: num_traits::AsPrimitive<LexerTypesT::StorageT>,
-    LexerTypesT::StorageT: TryFrom<usize>,
+    LexerTypesT::StorageT: TryFrom<usize> + ToTokens,
 {
     pub(crate) fn rule_ids_map(&self) -> Option<&HashMap<String, LexerTypesT::StorageT>> {
         self.rule_ids_map.as_ref()
@@ -342,6 +342,39 @@ where
             let lex_flags = lex_flags;
         }
     }
+
+    pub(crate) fn gen_rules_val(&self, build_env: &LexerBuildEnv<LexerTypesT>) -> TokenStream {
+        let rules = build_env.lexerdef.iter_rules().map(|r| {
+            let tok_id = QuoteOption(r.tok_id);
+            let n = QuoteOption(r.name().map(QuoteToString));
+            let target_state = QuoteOption(r.target_state().map(|(x, y)| QuoteTuple((x, y))));
+            let n_span = r.name_span();
+            let regex = QuoteToString(&r.re_str);
+            let start_states = r.start_states();
+            // Code gen to construct a rule.
+            //
+            // We cannot `impl ToToken for Rule` because `Rule` never stores `lex_flags`,
+            // Thus we reference the local lex_flags variable bound earlier.
+            quote! {
+                Rule::new(::lrlex::unstable_api::InternalPublicApi, #tok_id, #n, #n_span, #regex,
+                        vec![#(#start_states),*], #target_state, &lex_flags).unwrap()
+            }
+        });
+        // Code gen for `lexerdef()`s rules and the stack of `start_states`.
+        quote! {
+            let rules = vec![#(#rules),*];
+        }
+    }
+
+    pub(crate) fn gen_start_states_val(
+        &self,
+        build_env: &LexerBuildEnv<LexerTypesT>,
+    ) -> TokenStream {
+        let start_states = build_env.lexerdef.iter_start_states();
+        quote! {
+            let start_states: Vec<StartState> = vec![#(#start_states),*];
+        }
+    }
 }
 
 /// The quote impl of `ToTokens` for `Option` prints an empty string for `None`
@@ -357,5 +390,26 @@ impl<T: ToTokens> ToTokens for QuoteOption<T> {
             Some(ref t) => quote! { ::std::option::Option::Some(#t) },
             None => quote! { ::std::option::Option::None },
         });
+    }
+}
+
+/// The wrapped `&str` value will be emitted with a call to `to_string()`
+struct QuoteToString<'a>(&'a str);
+
+impl ToTokens for QuoteToString<'_> {
+    fn to_tokens(&self, tokens: &mut TokenStream) {
+        let x = &self.0;
+        tokens.append_all(quote! { #x.to_string() });
+    }
+}
+
+/// This wrapper adds a missing impl of `ToTokens` for tuples.
+/// For a tuple `(a, b)` emits `(a.to_tokens(), b.to_tokens())`
+struct QuoteTuple<T>(T);
+
+impl<A: ToTokens, B: ToTokens> ToTokens for QuoteTuple<(A, B)> {
+    fn to_tokens(&self, tokens: &mut TokenStream) {
+        let (a, b) = &self.0;
+        tokens.append_all(quote!((#a, #b)));
     }
 }
