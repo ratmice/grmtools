@@ -31,7 +31,7 @@ use std::{
 use wincode::SchemaWrite;
 
 use crate::{
-    DefaultLexerTypes, LRNonStreamingLexer, LexFlags, LexerDef,
+    DefaultLexerTypes, LRNonStreamingLexer, LexerDef,
     codegen::{LexerBuildEnvArgs, LexerSrcEnv, LexerSrcEnvError},
 };
 
@@ -178,6 +178,7 @@ pub enum RustEdition {
 ///
 /// This wrapper instead emits both `Some` and `None` variants.
 /// See: [quote #20](https://github.com/dtolnay/quote/issues/20)
+// FIXME Remove in the next patch.
 struct QuoteOption<T>(Option<T>);
 
 impl<T: ToTokens> ToTokens for QuoteOption<T> {
@@ -752,52 +753,7 @@ where
         let mod_name = code_gen
             .gen_mod_name(&build_env)
             .map_err(|e| ErrorString(e.to_string()))?;
-        let mut lexerdef_func_impl = {
-            let LexFlags {
-                allow_wholeline_comments,
-                dot_matches_new_line,
-                multi_line,
-                octal,
-                posix_escapes,
-                case_insensitive,
-                unicode,
-                swap_greed,
-                ignore_whitespace,
-                size_limit,
-                dfa_size_limit,
-                nest_limit,
-            } = build_env.lex_flags();
-            let allow_wholeline_comments = QuoteOption(allow_wholeline_comments.as_ref());
-            let dot_matches_new_line = QuoteOption(dot_matches_new_line.as_ref());
-            let multi_line = QuoteOption(multi_line.as_ref());
-            let octal = QuoteOption(octal.as_ref());
-            let posix_escapes = QuoteOption(posix_escapes.as_ref());
-            let case_insensitive = QuoteOption(case_insensitive.as_ref());
-            let unicode = QuoteOption(unicode.as_ref());
-            let swap_greed = QuoteOption(swap_greed.as_ref());
-            let ignore_whitespace = QuoteOption(ignore_whitespace.as_ref());
-            let size_limit = QuoteOption(size_limit.as_ref());
-            let dfa_size_limit = QuoteOption(dfa_size_limit.as_ref());
-            let nest_limit = QuoteOption(nest_limit.as_ref());
-
-            // Code gen for the lexerdef() `lex_flags` variable.
-            quote! {
-                let mut lex_flags = ::lrlex::DEFAULT_LEX_FLAGS;
-                lex_flags.allow_wholeline_comments = #allow_wholeline_comments.or(::lrlex::DEFAULT_LEX_FLAGS.allow_wholeline_comments);
-                lex_flags.dot_matches_new_line = #dot_matches_new_line.or(::lrlex::DEFAULT_LEX_FLAGS.dot_matches_new_line);
-                lex_flags.multi_line = #multi_line.or(::lrlex::DEFAULT_LEX_FLAGS.multi_line);
-                lex_flags.octal = #octal.or(::lrlex::DEFAULT_LEX_FLAGS.octal);
-                lex_flags.posix_escapes = #posix_escapes.or(::lrlex::DEFAULT_LEX_FLAGS.posix_escapes);
-                lex_flags.case_insensitive = #case_insensitive.or(::lrlex::DEFAULT_LEX_FLAGS.case_insensitive);
-                lex_flags.unicode = #unicode.or(::lrlex::DEFAULT_LEX_FLAGS.unicode);
-                lex_flags.swap_greed = #swap_greed.or(::lrlex::DEFAULT_LEX_FLAGS.swap_greed);
-                lex_flags.ignore_whitespace = #ignore_whitespace.or(::lrlex::DEFAULT_LEX_FLAGS.ignore_whitespace);
-                lex_flags.size_limit = #size_limit.or(::lrlex::DEFAULT_LEX_FLAGS.size_limit);
-                lex_flags.dfa_size_limit = #dfa_size_limit.or(::lrlex::DEFAULT_LEX_FLAGS.dfa_size_limit);
-                lex_flags.nest_limit = #nest_limit.or(::lrlex::DEFAULT_LEX_FLAGS.nest_limit);
-                let lex_flags = lex_flags;
-            }
-        };
+        let mut lexerdef_func_impl = code_gen.gen_lex_flags_decl(&build_env);
         {
             let start_states = lexerdef.iter_start_states();
             let rules = lexerdef.iter_rules().map(|r| {
@@ -823,6 +779,7 @@ where
                 let rules = vec![#(#rules),*];
             });
         }
+
         let lexerdef_ty = match build_env.lexerkind() {
             LexerKind::LRNonStreamingLexer => {
                 quote!(::lrlex::LRNonStreamingLexerDef)
