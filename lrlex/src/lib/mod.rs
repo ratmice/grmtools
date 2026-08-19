@@ -14,6 +14,7 @@
 
 use std::{error::Error, fmt};
 
+mod codegen;
 mod ctbuilder;
 #[doc(hidden)]
 pub mod defaults;
