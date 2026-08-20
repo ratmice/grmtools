@@ -6,8 +6,11 @@ use crate::{
     },
 };
 use regex::{Regex, RegexBuilder};
-use std::{error::Error, fmt, sync::LazyLock,
-    collections::{HashSet, HashMap}
+use std::{
+    collections::{HashMap, HashSet},
+    error::Error,
+    fmt,
+    sync::LazyLock,
 };
 
 #[derive(Debug)]
@@ -15,7 +18,7 @@ use std::{error::Error, fmt, sync::LazyLock,
 pub struct FileHeaders {
     pub grmtools: Header<Span>,
     pub grmtools_span: Span,
-    pub user: Header<Span>,
+    pub user: HashMap<String, (Span, UserSectionValue)>,
     pub user_span: Span,
 }
 
@@ -80,6 +83,15 @@ pub enum HeaderErrorKind {
     DuplicateEntry,
     InvalidEntry(&'static str),
     ConversionError(&'static str, &'static str),
+    InvalidUserSectionValueType,
+}
+
+#[derive(Debug)]
+pub enum UserSectionValue {
+    String(String, Span),
+    Num(u64, Span),
+    Bool(bool, Span),
+    Array(Vec<UserSectionValue>, Span),
 }
 
 impl fmt::Display for HeaderErrorKind {
@@ -93,6 +105,9 @@ impl fmt::Display for HeaderErrorKind {
             }
             HeaderErrorKind::InvalidEntry(s) => &format!("Invalid entry: '{}'", s),
             HeaderErrorKind::DuplicateEntry => "Duplicate Entry",
+            HeaderErrorKind::InvalidUserSectionValueType => {
+                "Invalid value type for the %user section"
+            }
             HeaderErrorKind::ConversionError(t, err_str) => {
                 &format!("Converting header value to type '{}': {}", t, err_str)
             }
@@ -441,19 +456,89 @@ impl<'input> GrmtoolsSectionParser<'input> {
         }
 
         // When a default empty header is produced, we currently give it an empty span at (0, 0) for convenience
-        let (grmtools, grmtools_span) = headers.remove("%grmtools").unwrap_or_else(|| (Header::new(), Span::new(0, 0)));
-        let (user, user_span) = headers.remove("%user").unwrap_or_else(|| (Header::new(), Span::new(0, 0)));
-        eprintln!("{:?} {:?}", grmtools, user);
-        Ok((FileHeaders{
-            grmtools,
-            grmtools_span,
-            user,
-            user_span,
-        }, cur_pos))
+        let (grmtools, grmtools_span) = headers
+            .remove("%grmtools")
+            .unwrap_or_else(|| (Header::new(), Span::new(0, 0)));
+        let (user_header, user_span) = headers
+            .remove("%user")
+            .unwrap_or_else(|| (Header::new(), Span::new(0, 0)));
+        let mut user = HashMap::new();
+        let mut errs = Vec::new();
+        for (key, HeaderValue(key_span, value)) in user_header.into_iter() {
+            match value {
+                Value::Flag(flag, val_span) => {
+                    user.insert(
+                        key.clone(),
+                        (*key_span, UserSectionValue::Bool(*flag, *val_span)),
+                    );
+                }
+                Value::Setting(setting) => match setting {
+                    Setting::Array(v, start_span, _) => {
+                        let mut out = Vec::with_capacity(v.capacity());
+                        for val in v {
+                            match val {
+                                Setting::String(s, val_span) => {
+                                    out.push(UserSectionValue::String(s.clone(), *val_span))
+                                }
+                                Setting::Num(n, val_span) => {
+                                    out.push(UserSectionValue::Num(*n, *val_span))
+                                }
+                                _ => {
+                                    errs.push(HeaderError {
+                                        kind: HeaderErrorKind::InvalidUserSectionValueType,
+                                        locations: vec![*key_span],
+                                    });
+                                }
+                            }
+                        }
+                        user.insert(
+                            key.clone(),
+                            (*key_span, UserSectionValue::Array(out, *start_span)),
+                        );
+                    }
+                    Setting::String(s, val_span) => {
+                        user.insert(
+                            key.clone(),
+                            (*key_span, UserSectionValue::String(s.clone(), *val_span)),
+                        );
+                    }
+                    Setting::Num(n, val_span) => {
+                        user.insert(
+                            key.clone(),
+                            (*key_span, UserSectionValue::Num(*n, *val_span)),
+                        );
+
+                    }
+
+                    _ => {
+                        errs.push(HeaderError {
+                            kind: HeaderErrorKind::InvalidUserSectionValueType,
+                            locations: vec![*key_span],
+                        });
+                    }
+                },
+            }
+        }
+        if !errs.is_empty() {
+            return Err(errs);
+        }
+        Ok((
+            FileHeaders {
+                grmtools,
+                grmtools_span,
+                user,
+                user_span,
+            },
+            cur_pos,
+        ))
     }
 
     #[allow(clippy::type_complexity)]
-    pub fn parse_sections(&'_ self, start_pos: usize, sections: &HashSet<&'static str>) -> Result<(Option<(Header<Span>, &'static str)>, usize), Vec<HeaderError<Span>>> {
+    pub fn parse_sections(
+        &'_ self,
+        start_pos: usize,
+        sections: &HashSet<&'static str>,
+    ) -> Result<(Option<(Header<Span>, &'static str)>, usize), Vec<HeaderError<Span>>> {
         for magic_string in sections {
             let grmtools_required = self.required && magic_string == &"%grmtools";
             let mut errs = Vec::new();
