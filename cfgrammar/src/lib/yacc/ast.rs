@@ -13,7 +13,9 @@ use super::{
 };
 
 use crate::{
-    Span, header::{GrmtoolsSectionParser, HeaderError, HeaderErrorKind, HeaderValue, UserSectionValue}, yacc::YaccOriginalActionKind,
+    Span,
+    header::{GrmtoolsSectionParser, HeaderError, HeaderErrorKind, HeaderValue, UserSectionValue},
+    yacc::YaccOriginalActionKind,
 };
 
 /// Any error from the Yacc parser returns an instance of this struct.
@@ -985,7 +987,7 @@ start -> () : "a" {$;;;; };
         );
     }
 
-        #[test]
+    #[test]
     fn test_user_section() {
         use super::*;
         let ast_validity = ASTWithValidityInfo::new(
@@ -1004,26 +1006,38 @@ start -> () : "a" { () };
 "#,
         );
 
-        if let Some((_, UserSectionValue::Bool(true, _))) = ast_validity.ast().user_section.get("flag") {
+        if let Some((_, UserSectionValue::Bool(true, _))) =
+            ast_validity.ast().user_section.get("flag")
+        {
         } else {
             panic!("Expected true flag");
         }
 
-        if let Some((_, UserSectionValue::Bool(false, _))) = ast_validity.ast().user_section.get("negative") {
-        }    else {
+        if let Some((_, UserSectionValue::Bool(false, _))) =
+            ast_validity.ast().user_section.get("negative")
+        {
+        } else {
             panic!("Expected false flag");
         }
 
-        if let Some((_, UserSectionValue::String(s, _))) = ast_validity.ast().user_section.get("string") {
+        if let Some((_, UserSectionValue::String(s, _))) =
+            ast_validity.ast().user_section.get("string")
+        {
             assert_eq!(s, "foo");
         } else {
             panic!("Expected string");
         }
-        if let Some((_, UserSectionValue::Array(arr, _))) = ast_validity.ast().user_section.get("vec") {
-            let string_vals = arr.iter().cloned().map(|s| match s {
-                UserSectionValue::String(s, _) => s,
-                _ => panic!("Expected string"),
-            }).collect::<Vec<String>>();
+        if let Some((_, UserSectionValue::Array(arr, _))) =
+            ast_validity.ast().user_section.get("vec")
+        {
+            let string_vals = arr
+                .iter()
+                .cloned()
+                .map(|s| match s {
+                    UserSectionValue::String(s, _) => s,
+                    _ => panic!("Expected string"),
+                })
+                .collect::<Vec<String>>();
             assert_eq!(string_vals, vec!["a".to_string(), "b".to_string()]);
         } else {
             panic!("Expected vec of strings");
