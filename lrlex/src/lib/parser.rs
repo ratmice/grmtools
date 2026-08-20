@@ -1885,4 +1885,56 @@ b "A"
             assert_eq!(expected, trimmed)
         }
     }
+
+    #[test]
+    fn test_user_section() {
+        use cfgrammar::header::UserSectionValue;
+        let src = r#"
+%user {
+   flag,
+   !negative,
+   string: "foo",
+   vec: ["a", "b"],
+   num: 0,
+}
+%%
+. 'dot'
+"#;
+        let lexerdef = LRNonStreamingLexerDef::<DefaultLexerTypes<u8>>::from_str(src).unwrap();
+        if let Some((_, UserSectionValue::Bool(true, _))) = lexerdef.user_section().get("flag") {
+        } else {
+            panic!("Expected true flag");
+        }
+
+        if let Some((_, UserSectionValue::Bool(false, _))) = lexerdef.user_section().get("negative")
+        {
+        } else {
+            panic!("Expected false flag");
+        }
+
+        if let Some((_, UserSectionValue::String(s, _))) = lexerdef.user_section().get("string") {
+            assert_eq!(s, "foo");
+        } else {
+            panic!("Expected string");
+        }
+        if let Some((_, UserSectionValue::Array(arr, _))) = lexerdef.user_section().get("vec") {
+            let string_vals = arr
+                .iter()
+                .cloned()
+                .map(|s| match s {
+                    UserSectionValue::String(s, _) => s,
+                    _ => panic!("Expected string"),
+                })
+                .collect::<Vec<String>>();
+            assert_eq!(string_vals, vec!["a".to_string(), "b".to_string()]);
+        } else {
+            panic!("Expected vec of strings");
+        }
+
+        if let Some((_, UserSectionValue::Num(n, _))) = lexerdef.user_section().get("num") {
+            assert_eq!(*n, 0);
+        } else {
+            panic!("Expected numeric");
+        }
+    }
 }

@@ -9,7 +9,10 @@ use std::{
 
 use cfgrammar::{
     NewlineCache, Span,
-    header::{GrmtoolsSectionParser, Header, HeaderError, HeaderErrorKind, HeaderValue, Value},
+    header::{
+        GrmtoolsSectionParser, Header, HeaderError, HeaderErrorKind, HeaderValue, UserSectionValue,
+        Value,
+    },
     span::Location,
 };
 use num_traits::{AsPrimitive, PrimInt, Unsigned};
@@ -399,6 +402,7 @@ where
     start_states: Vec<StartState>,
     lex_flags: LexFlags,
     pub(crate) expected_missing_tokens: Vec<String>,
+    user_section: HashMap<String, (Span, UserSectionValue)>,
     phantom: PhantomData<LexerTypesT>,
 }
 
@@ -416,6 +420,7 @@ where
             start_states,
             lex_flags: DEFAULT_LEX_FLAGS,
             expected_missing_tokens: vec![],
+            user_section: HashMap::new(),
             phantom: PhantomData,
         }
     }
@@ -433,6 +438,7 @@ where
                 start_states: p.start_states,
                 lex_flags: flags,
                 expected_missing_tokens: p.expected_missing_tokens,
+                user_section: header.user_section,
                 phantom: PhantomData,
             }
         })
@@ -544,13 +550,14 @@ where
         s: &str,
         lex_flags: LexFlags,
     ) -> LexBuildResult<LRNonStreamingLexerDef<LexerTypesT>> {
-        let (_, pos) = GrmtoolsSectionParser::new(s, false).parse().unwrap();
+        let (header, pos) = GrmtoolsSectionParser::new(s, false).parse().unwrap();
         LexParser::<LexerTypesT>::new_with_lex_flags(s[pos..].to_string(), lex_flags.clone()).map(
             |p| LRNonStreamingLexerDef {
                 rules: p.rules,
                 start_states: p.start_states,
                 lex_flags,
                 expected_missing_tokens: p.expected_missing_tokens,
+                user_section: header.user_section,
                 phantom: PhantomData,
             },
         )
@@ -680,6 +687,10 @@ where
     /// after all forced and default flags have been resolved.
     pub(crate) fn lex_flags(&self) -> Option<&LexFlags> {
         Some(&self.lex_flags)
+    }
+
+    pub fn user_section(&self) -> &HashMap<String, (Span, UserSectionValue)> {
+        &self.user_section
     }
 }
 
