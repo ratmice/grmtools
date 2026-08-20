@@ -6,7 +6,18 @@ use crate::{
     },
 };
 use regex::{Regex, RegexBuilder};
-use std::{error::Error, fmt, sync::LazyLock};
+use std::{error::Error, fmt, sync::LazyLock,
+    collections::{HashSet, HashMap}
+};
+
+#[derive(Debug)]
+#[doc(hidden)]
+pub struct FileHeaders {
+    pub grmtools: Header<Span>,
+    pub grmtools_span: Span,
+    pub user: Header<Span>,
+    pub user_span: Span,
+}
 
 /// An error regarding the `%grmtools` header section.
 ///
@@ -239,15 +250,13 @@ impl<T> Namespaced<T> {
 static RE_LEADING_WS: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"^[\p{Pattern_White_Space}]*").unwrap());
 static RE_NAME: LazyLock<Regex> = LazyLock::new(|| {
-    RegexBuilder::new(r"^[A-Z][A-Z_]*")
+    RegexBuilder::new(r"^[A-Z][A-Z_\.]*")
         .case_insensitive(true)
         .build()
         .unwrap()
 });
 static RE_DIGITS: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^[0-9]+").unwrap());
 static RE_STRING: LazyLock<Regex> = LazyLock::new(|| Regex::new(r#"^\"(\\.|[^"\\])*\""#).unwrap());
-
-const MAGIC: &str = "%grmtools";
 
 fn add_duplicate_occurrence<T: Eq + PartialEq + Clone>(
     errs: &mut Vec<HeaderError<T>>,
@@ -418,83 +427,110 @@ impl<'input> GrmtoolsSectionParser<'input> {
         Self { src, required }
     }
 
+    pub fn parse(&'_ self) -> Result<(FileHeaders, usize), Vec<HeaderError<Span>>> {
+        let mut sections_lookup = HashSet::from_iter(["%grmtools", "%user"]);
+        let mut cur_pos = 0;
+        let mut headers: HashMap<&'static str, (Header<Span>, Span)> = HashMap::new();
+        // This will error when a duplicate section is encountered, but only in a round about fashion.
+        // Because we remove the section from `sections_lookup`, the next go around it'll be unrecognized.
+        // As such, it's likely to be an `unrecognized declaration` instead of a nicer error.
+        while let (Some((header, section)), pos) = self.parse_sections(cur_pos, &sections_lookup)? {
+            sections_lookup.remove(section);
+            headers.insert(section, (header, Span::new(cur_pos, pos)));
+            cur_pos = pos;
+        }
+
+        // When a default empty header is produced, we currently give it an empty span at (0, 0) for convenience
+        let (grmtools, grmtools_span) = headers.remove("%grmtools").unwrap_or_else(|| (Header::new(), Span::new(0, 0)));
+        let (user, user_span) = headers.remove("%user").unwrap_or_else(|| (Header::new(), Span::new(0, 0)));
+        eprintln!("{:?} {:?}", grmtools, user);
+        Ok((FileHeaders{
+            grmtools,
+            grmtools_span,
+            user,
+            user_span,
+        }, cur_pos))
+    }
+
     #[allow(clippy::type_complexity)]
-    pub fn parse(&'_ self) -> Result<(Header<Span>, usize), Vec<HeaderError<Span>>> {
-        let mut errs = Vec::new();
-        if let Some(mut i) = self.lookahead_is(MAGIC, self.parse_ws(0)) {
-            let mut ret = Header::new();
-            i = self.parse_ws(i);
-            let section_start_pos = i;
-            if let Some(j) = self.lookahead_is("{", i) {
-                i = self.parse_ws(j);
-                while self.lookahead_is("}", i).is_none() && i < self.src.len() {
-                    let (key, key_loc, val, j) = match self.parse_key_value(i) {
-                        Ok((key, key_loc, val, pos)) => (key, key_loc, val, pos),
-                        Err(e) => {
-                            errs.push(e);
+    pub fn parse_sections(&'_ self, start_pos: usize, sections: &HashSet<&'static str>) -> Result<(Option<(Header<Span>, &'static str)>, usize), Vec<HeaderError<Span>>> {
+        for magic_string in sections {
+            let grmtools_required = self.required && magic_string == &"%grmtools";
+            let mut errs = Vec::new();
+            if let Some(mut i) = self.lookahead_is(magic_string, self.parse_ws(start_pos)) {
+                let mut ret = Header::new();
+                i = self.parse_ws(i);
+                let section_start_pos = i;
+                if let Some(j) = self.lookahead_is("{", i) {
+                    i = self.parse_ws(j);
+                    while self.lookahead_is("}", i).is_none() && i < self.src.len() {
+                        let (key, key_loc, val, j) = match self.parse_key_value(i) {
+                            Ok((key, key_loc, val, pos)) => (key, key_loc, val, pos),
+                            Err(e) => {
+                                errs.push(e);
+                                return Err(errs);
+                            }
+                        };
+                        match ret.entry(key) {
+                            Entry::Occupied(orig) => {
+                                let HeaderValue(orig_loc, _): &HeaderValue<Span> = orig.get();
+                                add_duplicate_occurrence(
+                                    &mut errs,
+                                    HeaderErrorKind::DuplicateEntry,
+                                    *orig_loc,
+                                    key_loc,
+                                )
+                            }
+                            Entry::Vacant(entry) => {
+                                entry.insert(HeaderValue(key_loc, val));
+                            }
+                        }
+                        if let Some(j) = self.lookahead_is(",", j) {
+                            i = self.parse_ws(j);
+                            continue;
+                        } else {
+                            i = self.parse_ws(j);
+                            break;
+                        }
+                    }
+                    if let Some(j) = self.lookahead_is("*", i) {
+                        errs.push(HeaderError {
+                            kind: HeaderErrorKind::UnexpectedToken(
+                                '*',
+                                "perhaps this is a glob, in which case it requires string quoting.",
+                            ),
+                            locations: vec![Span::new(i, j)],
+                        });
+                        return Err(errs);
+                    } else if let Some(i) = self.lookahead_is("}", i) {
+                        if errs.is_empty() {
+                            return Ok((Some((ret, magic_string)), i));
+                        } else {
                             return Err(errs);
                         }
-                    };
-                    match ret.entry(key) {
-                        Entry::Occupied(orig) => {
-                            let HeaderValue(orig_loc, _): &HeaderValue<Span> = orig.get();
-                            add_duplicate_occurrence(
-                                &mut errs,
-                                HeaderErrorKind::DuplicateEntry,
-                                *orig_loc,
-                                key_loc,
-                            )
-                        }
-                        Entry::Vacant(entry) => {
-                            entry.insert(HeaderValue(key_loc, val));
-                        }
-                    }
-                    if let Some(j) = self.lookahead_is(",", j) {
-                        i = self.parse_ws(j);
-                        continue;
                     } else {
-                        i = self.parse_ws(j);
-                        break;
-                    }
-                }
-                if let Some(j) = self.lookahead_is("*", i) {
-                    errs.push(HeaderError {
-                        kind: HeaderErrorKind::UnexpectedToken(
-                            '*',
-                            "perhaps this is a glob, in which case it requires string quoting.",
-                        ),
-                        locations: vec![Span::new(i, j)],
-                    });
-                    Err(errs)
-                } else if let Some(i) = self.lookahead_is("}", i) {
-                    if errs.is_empty() {
-                        Ok((ret, i))
-                    } else {
-                        Err(errs)
+                        errs.push(HeaderError {
+                            kind: HeaderErrorKind::ExpectedToken('}'),
+                            locations: vec![Span::new(section_start_pos, i)],
+                        });
+                        return Err(errs);
                     }
                 } else {
                     errs.push(HeaderError {
-                        kind: HeaderErrorKind::ExpectedToken('}'),
-                        locations: vec![Span::new(section_start_pos, i)],
+                        kind: HeaderErrorKind::ExpectedToken('{'),
+                        locations: vec![Span::new(i, i)],
                     });
-                    Err(errs)
+                    return Err(errs);
                 }
-            } else {
+            } else if grmtools_required {
                 errs.push(HeaderError {
-                    kind: HeaderErrorKind::ExpectedToken('{'),
-                    locations: vec![Span::new(i, i)],
+                    kind: HeaderErrorKind::MissingGrmtoolsSection,
+                    locations: vec![Span::new(0, 0)],
                 });
-                Err(errs)
+                return Err(errs);
             }
-        } else if self.required {
-            errs.push(HeaderError {
-                kind: HeaderErrorKind::MissingGrmtoolsSection,
-                locations: vec![Span::new(0, 0)],
-            });
-            Err(errs)
-        } else {
-            Ok((Header::new(), 0))
         }
+        Ok((None, start_pos))
     }
 
     fn parse_name(&self, i: usize) -> Result<(String, usize), HeaderError<Span>> {
@@ -755,12 +791,12 @@ mod test {
             let res = parser.parse();
             let errs = res.unwrap_err();
             assert_eq!(errs.len(), 1);
-            match errs[0] {
+            match &errs[0] {
                 HeaderError {
                     kind: HeaderErrorKind::UnexpectedToken('*', _),
                     locations: _,
                 } => (),
-                _ => panic!("Expected glob specific error"),
+                e => panic!("Expected glob specific error got '{e}'"),
             }
         }
     }

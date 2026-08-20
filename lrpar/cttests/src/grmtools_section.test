@@ -4,11 +4,15 @@ grammar: |
         recoverer: RecoveryKind::CPCTPlus,
         test_files: ["*.input_grmtools_section"]
     }
-    %token MAGIC IDENT NUM STRING
-    %epp MAGIC "%grmtools"
+    %token IDENT NUM STRING
     %%
     start -> Result<Header<Span>, Vec<HeaderError<Span>>>
     : MAGIC '{' contents '}' { $3 }
+    ;
+
+    MAGIC -> ()
+    : '%grmtools' { () }
+    | '%user' { () }
     ;
 
     contents -> Result<Header<Span>, Vec<HeaderError<Span>>>
@@ -151,7 +155,8 @@ grammar: |
 lexer: |
     %grmtools{case_insensitive}
     %%
-    %grmtools 'MAGIC'
+    %grmtools '%grmtools'
+    %user '%user'
     ! '!'
     [A-Z][A-Z_]* 'IDENT'
     [0-9]+ 'NUM'

@@ -511,7 +511,7 @@ where
                 }
                 ErrorString(out)
             })?;
-        header.merge_from(parsed_header)?;
+        header.merge_from(parsed_header.grmtools)?;
         header.mark_used(&"lexerkind".to_string());
         let lexerkind = match self.lexerkind {
             Some(lexerkind) => lexerkind,

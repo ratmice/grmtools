@@ -82,7 +82,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     let lex_l_path = &matches.free[0];
     let lex_src = read_file(lex_l_path);
     let lex_diag = SpannedDiagnosticFormatter::new(&lex_src, Path::new(lex_l_path));
-    let (mut header, _) = match GrmtoolsSectionParser::new(&lex_src, false).parse() {
+    let (header, _) = match GrmtoolsSectionParser::new(&lex_src, false).parse() {
         Ok(x) => x,
         Err(es) => {
             eprintln!(
@@ -95,6 +95,7 @@ fn main() -> Result<(), Box<dyn Error>> {
             process::exit(1);
         }
     };
+    let mut header = header.grmtools;
     header.mark_used(&"lexerkind".to_string());
     let lexerkind = if let Some(HeaderValue(_, lk_val)) = header.get("lexerkind") {
         LexerKind::try_from(lk_val)?

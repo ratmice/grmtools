@@ -242,7 +242,7 @@ fn main() {
         match parsed_header {
             Ok((parsed_header, _)) => {
                 header
-                    .merge_from(parsed_header)
+                    .merge_from(parsed_header.grmtools)
                     .expect("Specified merge behavior cannot fail");
             }
             Err(errs) => {

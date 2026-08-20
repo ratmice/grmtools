@@ -426,7 +426,7 @@ where
         let (mut header, pos) = GrmtoolsSectionParser::new(s, false)
             .parse()
             .map_err(|mut errs| errs.drain(..).map(LexBuildError::from).collect::<Vec<_>>())?;
-        let flags = LexFlags::try_from(&mut header).map_err(|e| vec![e.into()])?;
+        let flags = LexFlags::try_from(&mut header.grmtools).map_err(|e| vec![e.into()])?;
         LexParser::<LexerTypesT>::new_with_lex_flags(s[pos..].to_string(), flags.clone()).map(|p| {
             LRNonStreamingLexerDef {
                 rules: p.rules,

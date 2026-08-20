@@ -389,7 +389,7 @@ fn test_grmtools_section_files() {
             let (yacc_parsed, errs) = grmtools_section_y::parse(&l);
             let parser = cfgrammar::header::GrmtoolsSectionParser::new(&s, true);
             let (header_parsed, _) = parser.parse().unwrap();
-            assert_eq!(yacc_parsed.unwrap().unwrap(), header_parsed);
+            assert_eq!(yacc_parsed.unwrap().unwrap(), header_parsed.grmtools);
             assert!(errs.is_empty());
         }
     }
@@ -428,7 +428,7 @@ fn test_grmtools_section_strings() {
         let yacc_parsed = yacc_parsed.unwrap().unwrap();
         let parser = cfgrammar::header::GrmtoolsSectionParser::new(src, true);
         let (header_parsed, _) = parser.parse().unwrap();
-        assert_eq!(yacc_parsed, header_parsed);
+        assert_eq!(yacc_parsed, header_parsed.grmtools);
         assert!(errs.is_empty());
     }
 }

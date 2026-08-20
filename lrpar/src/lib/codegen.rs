@@ -301,7 +301,8 @@ where
     }
 
     fn parse_header(&self) -> Result<(Header<Span>, usize), Vec<HeaderError<Span>>> {
-        GrmtoolsSectionParser::new(self.src, false).parse()
+        let (headers, pos) = GrmtoolsSectionParser::new(self.src, false).parse()?;
+        Ok((headers.grmtools, pos))
     }
 
     /// Looks up the `yacckind` field from the header, marks the field
