@@ -13,9 +13,7 @@ use super::{
 };
 
 use crate::{
-    Span,
-    header::{GrmtoolsSectionParser, HeaderError, HeaderErrorKind, HeaderValue},
-    yacc::YaccOriginalActionKind,
+    Span, header::{GrmtoolsSectionParser, HeaderError, HeaderErrorKind, HeaderValue, UserSectionValue}, yacc::YaccOriginalActionKind,
 };
 
 /// Any error from the Yacc parser returns an instance of this struct.
@@ -178,6 +176,7 @@ pub struct GrammarAST {
     // The set of symbol names that, if unused in a
     // grammar, will not cause a warning or error.
     pub expect_unused: Vec<Symbol>,
+    pub user_section: HashMap<String, (Span, UserSectionValue)>,
 }
 
 #[derive(Debug, Clone)]
@@ -255,6 +254,7 @@ impl GrammarAST {
             parse_generics: None,
             programs: None,
             expect_unused: Vec::new(),
+            user_section: HashMap::new(),
         }
     }
 
@@ -983,5 +983,56 @@ start -> () : "a" {$;;;; };
                 spans: vec![Span::new(32, 33)],
             }]
         );
+    }
+
+        #[test]
+    fn test_user_section() {
+        use super::*;
+        let ast_validity = ASTWithValidityInfo::new(
+            YaccKind::Grmtools,
+            r#"
+%user {
+   flag,
+   !negative,
+   string: "foo",
+   vec: ["a", "b"],
+   num: 0,
+}
+%token a
+%%
+start -> () : "a" { () };
+"#,
+        );
+
+        if let Some((_, UserSectionValue::Bool(true, _))) = ast_validity.ast().user_section.get("flag") {
+        } else {
+            panic!("Expected true flag");
+        }
+
+        if let Some((_, UserSectionValue::Bool(false, _))) = ast_validity.ast().user_section.get("negative") {
+        }    else {
+            panic!("Expected false flag");
+        }
+
+        if let Some((_, UserSectionValue::String(s, _))) = ast_validity.ast().user_section.get("string") {
+            assert_eq!(s, "foo");
+        } else {
+            panic!("Expected string");
+        }
+        if let Some((_, UserSectionValue::Array(arr, _))) = ast_validity.ast().user_section.get("vec") {
+            let string_vals = arr.iter().cloned().map(|s| match s {
+                UserSectionValue::String(s, _) => s,
+                _ => panic!("Expected string"),
+            }).collect::<Vec<String>>();
+            assert_eq!(string_vals, vec!["a".to_string(), "b".to_string()]);
+        } else {
+            panic!("Expected vec of strings");
+        }
+
+        if let Some((_, UserSectionValue::Num(n, _))) = ast_validity.ast().user_section.get("num") {
+            assert_eq!(*n, 0);
+        } else {
+            panic!("Expected numeric");
+        }
     }
 }

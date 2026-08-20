@@ -18,8 +18,8 @@ use std::{
 pub struct FileHeaders {
     pub grmtools: Header<Span>,
     pub grmtools_span: Span,
-    pub user: HashMap<String, (Span, UserSectionValue)>,
-    pub user_span: Span,
+    pub user_section: HashMap<String, (Span, UserSectionValue)>,
+    pub user_section_span: Span,
 }
 
 /// An error regarding the `%grmtools` header section.
@@ -86,7 +86,7 @@ pub enum HeaderErrorKind {
     InvalidUserSectionValueType,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone, Eq, PartialEq, Hash)]
 pub enum UserSectionValue {
     String(String, Span),
     Num(u64, Span),
@@ -459,15 +459,15 @@ impl<'input> GrmtoolsSectionParser<'input> {
         let (grmtools, grmtools_span) = headers
             .remove("%grmtools")
             .unwrap_or_else(|| (Header::new(), Span::new(0, 0)));
-        let (user_header, user_span) = headers
+        let (user_header, user_section_span) = headers
             .remove("%user")
             .unwrap_or_else(|| (Header::new(), Span::new(0, 0)));
-        let mut user = HashMap::new();
+        let mut user_section = HashMap::new();
         let mut errs = Vec::new();
         for (key, HeaderValue(key_span, value)) in user_header.into_iter() {
             match value {
                 Value::Flag(flag, val_span) => {
-                    user.insert(
+                    user_section.insert(
                         key.clone(),
                         (*key_span, UserSectionValue::Bool(*flag, *val_span)),
                     );
@@ -491,23 +491,22 @@ impl<'input> GrmtoolsSectionParser<'input> {
                                 }
                             }
                         }
-                        user.insert(
+                        user_section.insert(
                             key.clone(),
                             (*key_span, UserSectionValue::Array(out, *start_span)),
                         );
                     }
                     Setting::String(s, val_span) => {
-                        user.insert(
+                        user_section.insert(
                             key.clone(),
                             (*key_span, UserSectionValue::String(s.clone(), *val_span)),
                         );
                     }
                     Setting::Num(n, val_span) => {
-                        user.insert(
+                        user_section.insert(
                             key.clone(),
                             (*key_span, UserSectionValue::Num(*n, *val_span)),
                         );
-
                     }
 
                     _ => {
@@ -526,8 +525,8 @@ impl<'input> GrmtoolsSectionParser<'input> {
             FileHeaders {
                 grmtools,
                 grmtools_span,
-                user,
-                user_span,
+                user_section,
+                user_section_span,
             },
             cur_pos,
         ))
