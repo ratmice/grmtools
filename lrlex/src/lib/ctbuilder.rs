@@ -1,10 +1,7 @@
 //! Build grammars at run-time.
 
 use cfgrammar::{
-    header::{
-        GrmtoolsSectionParser, Header, HeaderError, HeaderErrorKind, HeaderValue, Namespaced,
-        Setting, Value,
-    },
+    header::{Header, HeaderError, HeaderErrorKind, HeaderValue, Namespaced, Setting, Value},
     markmap::MergeBehavior,
     span::{Location, Span},
 };
@@ -15,9 +12,7 @@ use lrpar::{
 };
 use num_traits::{AsPrimitive, PrimInt, Unsigned};
 use proc_macro2::{Ident, TokenStream};
-use quote::{ToTokens, TokenStreamExt, format_ident, quote};
-use regex::Regex;
-use std::marker::PhantomData;
+use quote::{ToTokens, format_ident, quote};
 use std::{
     any::type_name,
     borrow::Borrow,
@@ -28,20 +23,21 @@ use std::{
     fs::{self, File, create_dir_all, read_to_string},
     hash::Hash,
     io::Write,
+    marker::PhantomData,
     path::{Path, PathBuf},
     sync::{LazyLock, Mutex},
 };
 use wincode::SchemaWrite;
 
-use crate::{DefaultLexerTypes, LRNonStreamingLexer, LRNonStreamingLexerDef, LexFlags, LexerDef};
+use crate::{
+    DefaultLexerTypes, LRNonStreamingLexer, LexerDef,
+    codegen::{LexerBuildEnvArgs, LexerSrcEnv, LexerSrcEnvError},
+};
 
 const RUST_FILE_EXT: &str = "rs";
 
 const ERROR: &str = "[Error]";
 const WARNING: &str = "[Warning]";
-
-static RE_TOKEN_ID: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"^[a-zA-Z_][a-zA-Z_0-9]*$").unwrap());
 
 static GENERATED_PATHS: LazyLock<Mutex<HashSet<PathBuf>>> =
     LazyLock::new(|| Mutex::new(HashSet::new()));
@@ -171,43 +167,6 @@ pub enum RustEdition {
     Rust2015,
     Rust2018,
     Rust2021,
-}
-
-/// The quote impl of `ToTokens` for `Option` prints an empty string for `None`
-/// and the inner value for `Some(inner_value)`.
-///
-/// This wrapper instead emits both `Some` and `None` variants.
-/// See: [quote #20](https://github.com/dtolnay/quote/issues/20)
-struct QuoteOption<T>(Option<T>);
-
-impl<T: ToTokens> ToTokens for QuoteOption<T> {
-    fn to_tokens(&self, tokens: &mut TokenStream) {
-        tokens.append_all(match self.0 {
-            Some(ref t) => quote! { ::std::option::Option::Some(#t) },
-            None => quote! { ::std::option::Option::None },
-        });
-    }
-}
-
-/// This wrapper adds a missing impl of `ToTokens` for tuples.
-/// For a tuple `(a, b)` emits `(a.to_tokens(), b.to_tokens())`
-struct QuoteTuple<T>(T);
-
-impl<A: ToTokens, B: ToTokens> ToTokens for QuoteTuple<(A, B)> {
-    fn to_tokens(&self, tokens: &mut TokenStream) {
-        let (a, b) = &self.0;
-        tokens.append_all(quote!((#a, #b)));
-    }
-}
-
-/// The wrapped `&str` value will be emitted with a call to `to_string()`
-struct QuoteToString<'a>(&'a str);
-
-impl ToTokens for QuoteToString<'_> {
-    fn to_tokens(&self, tokens: &mut TokenStream) {
-        let x = &self.0;
-        tokens.append_all(quote! { #x.to_string() });
-    }
 }
 
 /// A string which uses `Display` for it's `Debug` impl.
@@ -496,63 +455,48 @@ where
         let lex_src = read_to_string(lexerp)
             .map_err(|e| format!("When reading '{}': {e}", lexerp.display()))?;
         let lex_diag = SpannedDiagnosticFormatter::new(&lex_src, lexerp);
-        let mut header = self.header;
-        let (parsed_header, _) = GrmtoolsSectionParser::new(&lex_src, false)
-            .parse()
-            .map_err(|es| {
-                let mut out = String::new();
-                out.push_str(&format!(
-                    "\n{ERROR}{}\n",
-                    lex_diag.file_location_msg(" parsing the `%grmtools` section", None)
-                ));
-                for e in es {
-                    out.push_str(&indent("     ", &lex_diag.format_error(e).to_string()));
-                    out.push('\n');
-                }
-                ErrorString(out)
-            })?;
-        header.merge_from(parsed_header)?;
-        header.mark_used(&"lexerkind".to_string());
-        let lexerkind = match self.lexerkind {
-            Some(lexerkind) => lexerkind,
-            None => {
-                if let Some(HeaderValue(_, lk_val)) = header.get("lexerkind") {
-                    LexerKind::try_from(lk_val)?
-                } else {
-                    LexerKind::LRNonStreamingLexer
-                }
-            }
-        };
-        #[cfg(test)]
-        if let Some(inspect_lexerkind_cb) = self.inspect_lexerkind_cb {
-            inspect_lexerkind_cb(&lexerkind)?
-        }
-        let (lexerdef, lex_flags): (LRNonStreamingLexerDef<LexerTypesT>, LexFlags) =
-            match lexerkind {
-                LexerKind::LRNonStreamingLexer => {
-                    let lex_flags = LexFlags::try_from(&mut header)?;
-                    let lexerdef = LRNonStreamingLexerDef::<LexerTypesT>::new_with_options(
-                        &lex_src, lex_flags,
-                    )
-                    .map_err(|errs| {
+        let args = LexerBuildEnvArgs::new()
+            .mod_name(self.mod_name.map(|s| s.to_string()))
+            .lexerkind(self.lexerkind)
+            .visibility(self.visibility);
+        let mut build_env =
+            LexerSrcEnv::<LexerTypesT>::new_with_header(&lex_src, Some(lexerp), self.header)
+                .build_env(args)
+                .map_err(|e| match e {
+                    LexerSrcEnvError::GrmtoolsSectionParseError(es) => {
                         let mut out = String::new();
                         out.push_str(&format!(
                             "\n{ERROR}{}\n",
-                            lex_diag.file_location_msg("", None)
+                            lex_diag.file_location_msg(" parsing the `%grmtools` section", None)
+                        ));
+                        for e in es {
+                            out.push_str(&indent("     ", &lex_diag.format_error(e).to_string()));
+                            out.push('\n');
+                        }
+                        ErrorString(out)
+                    }
+                    LexerSrcEnvError::LexBuildErrors(errs) => {
+                        let mut out = String::new();
+                        out.push_str(&format!(
+                            "\n{ERROR}{}\n",
+                            lex_diag.file_location_msg(" building the lexer", None)
                         ));
                         for e in errs {
                             out.push_str(&indent("     ", &lex_diag.format_error(e).to_string()));
                             out.push('\n');
                         }
                         ErrorString(out)
-                    })?;
-                    let lex_flags = lexerdef.lex_flags().cloned();
-                    (lexerdef, lex_flags.unwrap())
-                }
-            };
+                    }
+                    e => ErrorString(e.to_string()),
+                })?;
+
+        #[cfg(test)]
+        if let Some(inspect_lexerkind_cb) = self.inspect_lexerkind_cb {
+            inspect_lexerkind_cb(build_env.lexerkind())?
+        }
 
         let ct_parser = if let Some(ref lrcfg) = self.lrpar_config {
-            let mut closure_lexerdef = lexerdef.clone();
+            let mut closure_lexerdef = build_env.lexerdef().clone();
             let mut ctp = CTParserBuilder::<LexerTypesT>::new().inspect_rt(Box::new(
                 move |yacc_header, rtpb, rule_ids_map, grm_path| {
                     let owned_map = rule_ids_map
@@ -632,34 +576,39 @@ where
             None
         };
 
-        let mut lexerdef = Box::new(lexerdef);
-        let unused_header_values = header.unused();
+        let unused_header_values = build_env.header().unused();
         if !unused_header_values.is_empty() {
             return Err(
                 format!("Unused header values: {}", unused_header_values.join(", ")).into(),
             );
         }
 
-        let (mut missing_from_lexer, missing_from_parser) = match self.rule_ids_map {
-            Some(ref rim) => {
-                // Convert from HashMap<String, _> to HashMap<&str, _>
-                let owned_map = rim
-                    .iter()
-                    .map(|(x, y)| (&**x, *y))
-                    .collect::<HashMap<_, _>>();
-                let (x, y) = lexerdef.set_rule_ids_spanned(&owned_map);
-                (
-                    x.map(|a| a.iter().map(|&b| b.to_string()).collect::<HashSet<_>>()),
-                    y.map(|a| {
-                        a.iter()
-                            .map(|(b, span)| (b.to_string(), *span))
-                            .collect::<HashSet<_>>()
-                    }),
-                )
+        let code_gen = build_env
+            .code_generator(self.rule_ids_map, env!("VERGEN_BUILD_TIMESTAMP"))
+            .map_err(|e| match e {})?;
+        let (mut missing_from_lexer, missing_from_parser) = {
+            let lexerdef = Box::new(build_env.lexerdef_mut());
+            match code_gen.rule_ids_map() {
+                Some(rim) => {
+                    // Convert from HashMap<String, _> to HashMap<&str, _>
+                    let owned_map = rim
+                        .iter()
+                        .map(|(x, y)| (&**x, *y))
+                        .collect::<HashMap<_, _>>();
+                    let (x, y) = lexerdef.set_rule_ids_spanned(&owned_map);
+                    (
+                        x.map(|a| a.iter().map(|&b| b.to_string()).collect::<HashSet<_>>()),
+                        y.map(|a| {
+                            a.iter()
+                                .map(|(b, span)| (b.to_string(), *span))
+                                .collect::<HashSet<_>>()
+                        }),
+                    )
+                }
+                None => (None, None),
             }
-            None => (None, None),
         };
-
+        let lexerdef = build_env.lexerdef();
         if let Some(mut mfl) = missing_from_lexer.take() {
             for tok in &lexerdef.expected_missing_tokens {
                 mfl.remove(tok.as_str());
@@ -760,163 +709,9 @@ where
             fs::remove_file(outp).ok();
             panic!();
         }
-
-        let mod_name = match self.mod_name {
-            Some(s) => s.to_owned(),
-            None => {
-                // The user hasn't specified a module name, so we create one automatically: what we
-                // do is strip off all the filename extensions (note that it's likely that inp ends
-                // with `l.rs`, so we potentially have to strip off more than one extension) and
-                // then add `_l` to the end.
-                let mut stem = lexerp.to_str().unwrap();
-                loop {
-                    let new_stem = Path::new(stem).file_stem().unwrap().to_str().unwrap();
-                    if stem == new_stem {
-                        break;
-                    }
-                    stem = new_stem;
-                }
-                format!("{}_l", stem)
-            }
-        };
-        let mod_name =
-            match syn::parse_str::<proc_macro2::Ident>(&mod_name) {
-                Ok(s) => s,
-                Err(e) => return Err(format!(
-                    "CTLexerBuilder::mod_name(\"{}\") is not a valid rust identifier due to '{}'",
-                    mod_name, e
-                )
-                .into()),
-            };
-        let mut lexerdef_func_impl = {
-            let LexFlags {
-                allow_wholeline_comments,
-                dot_matches_new_line,
-                multi_line,
-                octal,
-                posix_escapes,
-                case_insensitive,
-                unicode,
-                swap_greed,
-                ignore_whitespace,
-                size_limit,
-                dfa_size_limit,
-                nest_limit,
-            } = lex_flags;
-            let allow_wholeline_comments = QuoteOption(allow_wholeline_comments);
-            let dot_matches_new_line = QuoteOption(dot_matches_new_line);
-            let multi_line = QuoteOption(multi_line);
-            let octal = QuoteOption(octal);
-            let posix_escapes = QuoteOption(posix_escapes);
-            let case_insensitive = QuoteOption(case_insensitive);
-            let unicode = QuoteOption(unicode);
-            let swap_greed = QuoteOption(swap_greed);
-            let ignore_whitespace = QuoteOption(ignore_whitespace);
-            let size_limit = QuoteOption(size_limit);
-            let dfa_size_limit = QuoteOption(dfa_size_limit);
-            let nest_limit = QuoteOption(nest_limit);
-
-            // Code gen for the lexerdef() `lex_flags` variable.
-            quote! {
-                let mut lex_flags = ::lrlex::DEFAULT_LEX_FLAGS;
-                lex_flags.allow_wholeline_comments = #allow_wholeline_comments.or(::lrlex::DEFAULT_LEX_FLAGS.allow_wholeline_comments);
-                lex_flags.dot_matches_new_line = #dot_matches_new_line.or(::lrlex::DEFAULT_LEX_FLAGS.dot_matches_new_line);
-                lex_flags.multi_line = #multi_line.or(::lrlex::DEFAULT_LEX_FLAGS.multi_line);
-                lex_flags.octal = #octal.or(::lrlex::DEFAULT_LEX_FLAGS.octal);
-                lex_flags.posix_escapes = #posix_escapes.or(::lrlex::DEFAULT_LEX_FLAGS.posix_escapes);
-                lex_flags.case_insensitive = #case_insensitive.or(::lrlex::DEFAULT_LEX_FLAGS.case_insensitive);
-                lex_flags.unicode = #unicode.or(::lrlex::DEFAULT_LEX_FLAGS.unicode);
-                lex_flags.swap_greed = #swap_greed.or(::lrlex::DEFAULT_LEX_FLAGS.swap_greed);
-                lex_flags.ignore_whitespace = #ignore_whitespace.or(::lrlex::DEFAULT_LEX_FLAGS.ignore_whitespace);
-                lex_flags.size_limit = #size_limit.or(::lrlex::DEFAULT_LEX_FLAGS.size_limit);
-                lex_flags.dfa_size_limit = #dfa_size_limit.or(::lrlex::DEFAULT_LEX_FLAGS.dfa_size_limit);
-                lex_flags.nest_limit = #nest_limit.or(::lrlex::DEFAULT_LEX_FLAGS.nest_limit);
-                let lex_flags = lex_flags;
-            }
-        };
-        {
-            let start_states = lexerdef.iter_start_states();
-            let rules = lexerdef.iter_rules().map(|r| {
-                    let tok_id = QuoteOption(r.tok_id);
-                    let n = QuoteOption(r.name().map(QuoteToString));
-                    let target_state =
-                        QuoteOption(r.target_state().map(|(x, y)| QuoteTuple((x, y))));
-                    let n_span = r.name_span();
-                    let regex = QuoteToString(&r.re_str);
-                    let start_states = r.start_states();
-                    // Code gen to construct a rule.
-                    //
-                    // We cannot `impl ToToken for Rule` because `Rule` never stores `lex_flags`,
-                    // Thus we reference the local lex_flags variable bound earlier.
-                    quote! {
-                        Rule::new(::lrlex::unstable_api::InternalPublicApi, #tok_id, #n, #n_span, #regex,
-                                vec![#(#start_states),*], #target_state, &lex_flags).unwrap()
-                    }
-                });
-            // Code gen for `lexerdef()`s rules and the stack of `start_states`.
-            lexerdef_func_impl.append_all(quote! {
-                let start_states: Vec<StartState> = vec![#(#start_states),*];
-                let rules = vec![#(#rules),*];
-            });
-        }
-        let lexerdef_ty = match lexerkind {
-            LexerKind::LRNonStreamingLexer => {
-                quote!(::lrlex::LRNonStreamingLexerDef)
-            }
-        };
-        // Code gen for the lexerdef() return value referencing variables bound earlier.
-        lexerdef_func_impl.append_all(quote! {
-            #lexerdef_ty::from_rules(start_states, rules)
-        });
-
-        let mut token_consts = TokenStream::new();
-        if let Some(rim) = self.rule_ids_map {
-            let mut rim_sorted = Vec::from_iter(rim.iter());
-            rim_sorted.sort_by_key(|(k, _)| *k);
-            for (name, id) in rim_sorted {
-                if RE_TOKEN_ID.is_match(name) {
-                    let tok_ident = format_ident!("N_{}", name.to_ascii_uppercase());
-                    let storaget =
-                        str::parse::<TokenStream>(type_name::<LexerTypesT::StorageT>()).unwrap();
-                    // Code gen for the constant token values.
-                    let tok_const = quote! {
-                        #[allow(dead_code)]
-                        pub const #tok_ident: #storaget = #id;
-                    };
-                    token_consts.extend(tok_const)
-                }
-            }
-        }
-        let token_consts = token_consts.into_iter();
-        let out_tokens = {
-            let lexerdef_param = str::parse::<TokenStream>(type_name::<LexerTypesT>()).unwrap();
-            let mod_vis = self.visibility;
-            // Code gen for the generated module.
-            quote! {
-                #mod_vis mod #mod_name {
-                    use ::lrlex::{LexerDef, Rule, StartState};
-                    #[allow(dead_code)]
-                    pub fn lexerdef() -> #lexerdef_ty<#lexerdef_param> {
-                        #lexerdef_func_impl
-                    }
-
-                    #(#token_consts)*
-                }
-            }
-        };
-        // Try and run a code formatter on the generated code.
-        let unformatted = out_tokens.to_string();
-        let mut outs = String::new();
-        // Record the time that this version of lrlex was built. If the source code changes and rustc
-        // forces a recompile, this will change this value, causing anything which depends on this
-        // build of lrlex to be recompiled too.
-        let timestamp = env!("VERGEN_BUILD_TIMESTAMP");
-        write!(outs, "// lrlex build time: {}\n\n", quote!(#timestamp),).ok();
-        outs.push_str(
-            &syn::parse_str(&unformatted)
-                .map(|syntax_tree| prettyplease::unparse(&syntax_tree))
-                .unwrap_or(unformatted),
-        );
+        let outs = code_gen
+            .generate(&build_env)
+            .map_err(|e| ErrorString(e.to_string()))?;
         // If the file we're about to write out already exists with the same contents, then we
         // don't overwrite it (since that will force a recompile of the file, and relinking of the
         // binary etc).
@@ -1547,7 +1342,7 @@ A  "A"
                 let err_string = e.to_string();
                 assert_eq!(
                     err_string,
-                    "CTLexerBuilder::mod_name(\"contains-a-dash_l\") is not a valid rust identifier due to 'unexpected token'"
+                    "mod_name 'contains-a-dash_l' is not a valid rust identifier due to 'unexpected token'"
                 );
             }
         }
