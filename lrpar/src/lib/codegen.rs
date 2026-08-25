@@ -32,6 +32,7 @@ const ACTIONS_KIND: &str = "__GtActionsKind";
 const ACTIONS_KIND_PREFIX: &str = "Ak";
 const ACTIONS_KIND_HIDDEN: &str = "__GtActionsKindHidden";
 
+#[non_exhaustive]
 pub(crate) enum ParserSrcEnvError {
     GrmtoolsSectionParseError(Vec<HeaderError<Span>>),
     GrmtoolsSectionMergeError(MergeError<String, Box<HeaderValue<Location>>>),
@@ -40,6 +41,7 @@ pub(crate) enum ParserSrcEnvError {
     MissingModName,
 }
 
+#[non_exhaustive]
 pub(crate) enum ParserBuildEnvError<LexerTypesT>
 where
     LexerTypesT: LexerTypes,
@@ -51,6 +53,7 @@ where
     GrmtoolsSectionMissingRequiredKeys(Vec<String>),
 }
 
+#[non_exhaustive]
 pub(crate) enum CodegenError {
     ProcMacro2Error(proc_macro2::LexError),
     InvalidRustIdentifierModName(syn::Error, String),
