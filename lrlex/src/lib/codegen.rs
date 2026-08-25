@@ -21,6 +21,7 @@ use std::{
 static RE_TOKEN_ID: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"^[a-zA-Z_][a-zA-Z_0-9]*$").unwrap());
 
+#[non_exhaustive]
 pub(crate) enum LexerSrcEnvError {
     GrmtoolsSectionParseError(Vec<HeaderError<Span>>),
     GrmtoolsSectionMergeError(MergeError<String, Box<HeaderValue<Location>>>),
@@ -229,6 +230,7 @@ where
     }
 }
 
+#[non_exhaustive]
 pub(crate) enum LexerBuildEnvError {}
 
 impl fmt::Display for LexerBuildEnvError {
@@ -279,6 +281,7 @@ where
     }
 }
 
+#[non_exhaustive]
 pub(crate) enum LexerCodegenError {
     InvalidRustIdentifierModName { mod_name: String, error: syn::Error },
 }
