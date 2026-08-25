@@ -504,9 +504,9 @@ where
                         .map(|(x, y)| (&**x, *y))
                         .collect::<HashMap<_, _>>();
                     closure_lexerdef.set_rule_ids(&owned_map);
-                    yacc_header.mark_used(&"test_files".to_string());
+                    yacc_header.mark_used(&"lrpar.test_files".to_string());
                     let grammar = rtpb.grammar();
-                    let test_glob = yacc_header.get("test_files");
+                    let test_glob = yacc_header.get("lrpar.test_files");
                     let mut err_str = None;
                     let add_error_line = |err_str: &mut Option<String>, line| {
                         if let Some(err_str) = err_str {
@@ -841,7 +841,7 @@ where
     ///
     /// Setting this flag will override the same flag within a `%grmtools` section.
     pub fn allow_wholeline_comments(mut self, flag: bool) -> Self {
-        let key = "allow_wholeline_comments".to_string();
+        let key = "lrlex.allow_wholeline_comments".to_string();
         self.header.insert(
             key,
             HeaderValue(
@@ -857,7 +857,7 @@ where
     ///
     /// Setting this flag will override the same flag within a `%grmtools` section.
     pub fn dot_matches_new_line(mut self, flag: bool) -> Self {
-        let key = "dot_matches_new_line".to_string();
+        let key = "regex.dot_matches_new_line".to_string();
         self.header.insert(
             key,
             HeaderValue(
@@ -873,7 +873,7 @@ where
     ///
     /// Setting this flag will override the same flag within a `%grmtools` section.
     pub fn multi_line(mut self, flag: bool) -> Self {
-        let key = "multi_line".to_string();
+        let key = "regex.multi_line".to_string();
         self.header.insert(
             key,
             HeaderValue(
@@ -889,7 +889,7 @@ where
     ///
     /// Setting this flag will override the same flag within a `%grmtools` section.
     pub fn posix_escapes(mut self, flag: bool) -> Self {
-        let key = "posix_escapes".to_string();
+        let key = "lrlex.posix_escapes".to_string();
         self.header.insert(
             key,
             HeaderValue(
@@ -905,7 +905,7 @@ where
     ///
     /// Setting this flag will override the same flag within a `%grmtools` section.
     pub fn octal(mut self, flag: bool) -> Self {
-        let key = "octal".to_string();
+        let key = "regex.octal".to_string();
         self.header.insert(
             key,
             HeaderValue(
@@ -921,7 +921,7 @@ where
     ///
     /// Setting this flag will override the same flag within a `%grmtools` section.
     pub fn swap_greed(mut self, flag: bool) -> Self {
-        let key = "swap_greed".to_string();
+        let key = "regex.swap_greed".to_string();
         self.header.insert(
             key,
             HeaderValue(
@@ -937,7 +937,7 @@ where
     ///
     /// Setting this flag will override the same flag within a `%grmtools` section.
     pub fn ignore_whitespace(mut self, flag: bool) -> Self {
-        let key = "ignore_whitespace".to_string();
+        let key = "regex.ignore_whitespace".to_string();
         self.header.insert(
             key,
             HeaderValue(
@@ -953,7 +953,7 @@ where
     ///
     /// Setting this flag will override the same flag within a `%grmtools` section.
     pub fn unicode(mut self, flag: bool) -> Self {
-        let key = "unicode".to_string();
+        let key = "regex.unicode".to_string();
         self.header.insert(
             key,
             HeaderValue(
@@ -969,7 +969,7 @@ where
     ///
     /// Setting this flag will override the same flag within a `%grmtools` section.
     pub fn case_insensitive(mut self, flag: bool) -> Self {
-        let key = "case_insensitive".to_string();
+        let key = "regex.case_insensitive".to_string();
         self.header.insert(
             key,
             HeaderValue(
@@ -985,7 +985,7 @@ where
     ///
     /// Setting this flag will override the same flag within a `%grmtools` section.
     pub fn size_limit(mut self, sz: usize) -> Self {
-        let key = "size_limit".to_string();
+        let key = "regex.size_limit".to_string();
         self.header.insert(
             key,
             HeaderValue(
@@ -1004,7 +1004,7 @@ where
     ///
     /// Setting this flag will override the same flag within a `%grmtools` section.
     pub fn dfa_size_limit(mut self, sz: usize) -> Self {
-        let key = "dfa_size_limit".to_string();
+        let key = "regex.dfa_size_limit".to_string();
         self.header.insert(
             key,
             HeaderValue(
@@ -1023,7 +1023,7 @@ where
     ///
     /// Setting this flag will override the same flag within a `%grmtools` section.
     pub fn nest_limit(mut self, lim: u32) -> Self {
-        let key = "nest_limit".to_string();
+        let key = "regex.nest_limit".to_string();
         self.header.insert(
             key,
             HeaderValue(

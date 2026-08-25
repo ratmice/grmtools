@@ -6,7 +6,7 @@ use crate::{
     },
 };
 use regex::{Regex, RegexBuilder};
-use std::{error::Error, fmt, sync::LazyLock};
+use std::{collections::HashMap, error::Error, fmt, sync::LazyLock};
 
 /// An error regarding the `%grmtools` header section.
 ///
@@ -239,13 +239,53 @@ impl<T> Namespaced<T> {
 static RE_LEADING_WS: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"^[\p{Pattern_White_Space}]*").unwrap());
 static RE_NAME: LazyLock<Regex> = LazyLock::new(|| {
-    RegexBuilder::new(r"^[A-Z][A-Z_]*")
+    RegexBuilder::new(r"^[A-Z][A-Z_\.]*")
+        .case_insensitive(true)
+        .build()
+        .unwrap()
+});
+#[doc(hidden)]
+pub static RE_CRATE_DOT: LazyLock<Regex> = LazyLock::new(|| {
+    RegexBuilder::new(r"^[A-Z][A-Z_]*\.")
         .case_insensitive(true)
         .build()
         .unwrap()
 });
 static RE_DIGITS: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^[0-9]+").unwrap());
 static RE_STRING: LazyLock<Regex> = LazyLock::new(|| Regex::new(r#"^\"(\\.|[^"\\])*\""#).unwrap());
+#[doc(hidden)]
+pub static CRATE_KEY_MAP: LazyLock<HashMap<&'static str, &'static str>> = LazyLock::new(|| {
+    let mut map = HashMap::new();
+    let cfgrammar = ["yacckind"];
+    let lrpar = ["recoverer", "test_files", "serialisation_format"];
+
+    let lrlex = ["lexerkind", "allow_wholeline_comments", "posix_escapes"];
+    let regex = [
+        "case_insensitive",
+        "dot_matches_new_line",
+        "multi_line",
+        "octal",
+        "swap_greed",
+        "ignore_whitespace",
+        "unicode",
+        "size_limit",
+        "dfa_size_limit",
+        "nest_limit",
+    ];
+    for s in cfgrammar {
+        map.insert(s, "cfgrammar");
+    }
+    for s in lrpar {
+        map.insert(s, "lrpar");
+    }
+    for s in lrlex {
+        map.insert(s, "lrlex");
+    }
+    for s in regex {
+        map.insert(s, "regex");
+    }
+    map
+});
 
 const MAGIC: &str = "%grmtools";
 
@@ -429,7 +469,18 @@ impl<'input> GrmtoolsSectionParser<'input> {
                 i = self.parse_ws(j);
                 while self.lookahead_is("}", i).is_none() && i < self.src.len() {
                     let (key, key_loc, val, j) = match self.parse_key_value(i) {
-                        Ok((key, key_loc, val, pos)) => (key, key_loc, val, pos),
+                        Ok((key, key_loc, val, pos)) => {
+                            let key = if !RE_CRATE_DOT.is_match(&key) {
+                                if let Some(crate_name) = CRATE_KEY_MAP.get(key.as_str()) {
+                                    format!("{crate_name}.{key}")
+                                } else {
+                                    key
+                                }
+                            } else {
+                                key
+                            };
+                            (key, key_loc, val, pos)
+                        }
                         Err(e) => {
                             errs.push(e);
                             return Err(errs);

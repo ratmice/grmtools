@@ -556,7 +556,7 @@ where
             .expect("output_path must be specified before processing.");
         let mut header = Header::new();
 
-        match header.entry("yacckind".to_string()) {
+        match header.entry("cfgrammar.yacckind".to_string()) {
             Entry::Occupied(_) => unreachable!(),
             Entry::Vacant(mut v) => match self.yacckind {
                 Some(YaccKind::Eco) => panic!("Eco compile-time grammar generation not supported."),
@@ -574,7 +574,7 @@ where
             },
         }
         if let Some(recoverer) = self.recoverer {
-            match header.entry("recoverer".to_string()) {
+            match header.entry("lrpar.recoverer".to_string()) {
                 Entry::Occupied(_) => unreachable!(),
                 Entry::Vacant(v) => {
                     let rk_value: Value<Location> = Value::try_from(recoverer)?;
@@ -588,7 +588,7 @@ where
         }
 
         if let Some(encoding) = self.serialisation_format {
-            match header.entry("serialisation_format".to_string()) {
+            match header.entry("lrpar.serialisation_format".to_string()) {
                 Entry::Occupied(_) => unreachable!(),
                 Entry::Vacant(v) => {
                     let rk_value: Value<Location> = Value::try_from(encoding)?;

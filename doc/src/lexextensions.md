@@ -26,26 +26,26 @@ other flags should specify their value immediately after the flag name.
 
 ## List of flags:
 
-| Flag                          | Value     | Required | Regex[^regex] |
-|-------------------------------|-----------|----------|---------------|
-| `lexerkind`                   | [LexerKind](lexcompatibility.md#lexerkinds) | &cross;  | &cross; |
-| `posix_escapes`[^†]           | bool      | &cross;  | &cross;       |
-| `allow_wholeline_comment`[^‡] | bool      | &cross;  | &cross;       |
-| `case_insensitive`            | bool      | &cross;  | &checkmark;   |
-| `dot_matches_new_line`        | bool      | &cross;  | &checkmark;   |
-| `multi_line`                  | bool      | &cross;  | &checkmark;   |
-| `octal`                       | bool      | &cross;  | &checkmark;   |
-| `swap_greed`                  | bool      | &cross;  | &checkmark;   |
-| `ignore_whitespace`           | bool      | &cross;  | &checkmark;   |
-| `unicode`                     | bool      | &cross;  | &checkmark;   |
-| `size_limit`                  | usize     | &cross;  | &checkmark;   |
-| `dfa_size_limit`              | usize     | &cross;  | &checkmark;   |
-| `nest_limit`                  | u32       | &cross;  | &checkmark;   |
+| Flag                          | Value     | Required |
+|-------------------------------|-----------|----------|
+| `lrlex.lexerkind`                   | [LexerKind](lexcompatibility.md#lexerkinds) | &cross;  |
+| `lrlex.posix_escapes`[^†]           | bool      | &cross;  |
+| `lrlex.allow_wholeline_comments`[^‡] | bool      | &cross;  |
+| `regex.case_insensitive`            | bool      | &cross;  |
+| `regex.dot_matches_new_line`        | bool      | &cross;  |
+| `regex.multi_line`                  | bool      | &cross;  |
+| `regex.octal`                       | bool      | &cross;  |
+| `regex.swap_greed`                  | bool      | &cross;  |
+| `regex.ignore_whitespace`           | bool      | &cross;  |
+| `regex.unicode`                     | bool      | &cross;  |
+| `regex.size_limit`                  | usize     | &cross;  |
+| `regex.dfa_size_limit`              | usize     | &cross;  |
+| `regex.nest_limit`                  | u32       | &cross;  |
 
 [^†]: Enable compatibility with posix escape sequences.
 [^‡]: Enables rust style `// comments` at the start of lines.
 Which requires escaping of `/` when used in a regex.
-[^regex]: &checkmark; Flag gets passed directly to `regex::RegexBuilder`.
+[^regex]: Flag gets passed directly to `regex::RegexBuilder`.
 
 
 ## Flags affecting Posix compatibility
