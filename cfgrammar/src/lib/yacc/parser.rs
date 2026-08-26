@@ -16,7 +16,7 @@ use wincode::{SchemaRead, SchemaWrite};
 
 use crate::{
     Span, Spanned,
-    header::{GrmtoolsSectionParser, HeaderErrorKind},
+    header::{GrmtoolsSectionParser, GrmtoolsSectionValue, HeaderErrorKind, HeaderValue},
 };
 
 pub type YaccGrammarResult<T> = Result<T, Vec<YaccGrammarError>>;
@@ -337,9 +337,15 @@ impl YaccParser<'_> {
 
     pub(crate) fn parse(&mut self) -> YaccGrammarResult<usize> {
         let mut errs = Vec::new();
-        let (_, pos) = GrmtoolsSectionParser::new(self.src, false)
+        let (header, pos) = GrmtoolsSectionParser::new(self.src, false)
             .parse()
             .map_err(|mut errs| errs.drain(..).map(|e| e.into()).collect::<Vec<_>>())?;
+        for (key, HeaderValue(key_span, value)) in header.into_iter() {
+            let value = value.clone();
+            self.ast
+                .grmtools_section
+                .insert(key.clone(), (*key_span, GrmtoolsSectionValue::from(value)));
+        }
         // We pass around an index into the *bytes* of self.src. We guarantee that at all times
         // this points to the beginning of a UTF-8 character (since multibyte characters exist, not
         // every byte within the string is also a valid character).

@@ -14,7 +14,9 @@ use super::{
 
 use crate::{
     Span,
-    header::{GrmtoolsSectionParser, HeaderError, HeaderErrorKind, HeaderValue},
+    header::{
+        GrmtoolsSectionParser, GrmtoolsSectionValue, HeaderError, HeaderErrorKind, HeaderValue,
+    },
     yacc::YaccOriginalActionKind,
 };
 
@@ -178,6 +180,7 @@ pub struct GrammarAST {
     // The set of symbol names that, if unused in a
     // grammar, will not cause a warning or error.
     pub expect_unused: Vec<Symbol>,
+    pub grmtools_section: HashMap<String, (Span, GrmtoolsSectionValue)>,
 }
 
 #[derive(Debug, Clone)]
@@ -255,6 +258,7 @@ impl GrammarAST {
             parse_generics: None,
             programs: None,
             expect_unused: Vec::new(),
+            grmtools_section: HashMap::new(),
         }
     }
 
@@ -542,6 +546,20 @@ impl GrammarAST {
                         }
                     }),
             )
+    }
+
+    pub fn grmtools_section_values(
+        &self,
+    ) -> impl Iterator<Item = (&String, &(Span, GrmtoolsSectionValue))> {
+        self.grmtools_section.iter()
+    }
+
+    pub fn grmtools_section_values_for_crate(
+        &self,
+        crate_name: &str,
+    ) -> impl Iterator<Item = (&String, &(Span, GrmtoolsSectionValue))> {
+        self.grmtools_section_values()
+            .filter(move |(key, _)| key.starts_with(&format!("{crate_name}.")))
     }
 }
 

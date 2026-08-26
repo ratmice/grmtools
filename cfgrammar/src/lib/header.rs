@@ -48,7 +48,7 @@ impl Spanned for HeaderError<Span> {
 
 // This is essentially a tuple that needs a newtype so we can implement `From` for it.
 // Thus we aren't worried about it being `pub`.
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Clone)]
 #[doc(hidden)]
 pub struct HeaderValue<T>(pub T, pub Value<T>);
 
@@ -69,6 +69,15 @@ pub enum HeaderErrorKind {
     DuplicateEntry,
     InvalidEntry(&'static str),
     ConversionError(&'static str, &'static str),
+}
+
+#[derive(Debug, Clone, Eq, PartialEq, Hash)]
+pub enum GrmtoolsSectionValue {
+    String(String, Span),
+    Num(u64, Span),
+    Bool(bool, Span),
+    Array(Vec<GrmtoolsSectionValue>, Span),
+    RustLike(String, Span),
 }
 
 impl fmt::Display for HeaderErrorKind {
@@ -116,14 +125,14 @@ impl<T> HeaderError<T> {
 ///     member: ("Bar", ...)
 /// }
 /// ```
-#[derive(Debug, Eq, PartialEq)]
+#[derive(Debug, Eq, PartialEq, Clone)]
 #[doc(hidden)]
 pub struct Namespaced<T> {
     pub namespace: Option<(String, T)>,
     pub member: (String, T),
 }
 
-#[derive(Debug, Eq, PartialEq)]
+#[derive(Debug, Eq, PartialEq, Clone)]
 #[doc(hidden)]
 pub enum Setting<T> {
     /// A value like `YaccKind::Grmtools`
@@ -152,7 +161,7 @@ pub struct GrmtoolsSectionParser<'input> {
 ///
 /// To be useful across diverse crates this types fields are limited to types derived from `core::` types.
 /// like booleans, numeric types, and string values.
-#[derive(Debug, Eq, PartialEq)]
+#[derive(Debug, Eq, PartialEq, Clone)]
 #[doc(hidden)]
 pub enum Value<T> {
     Flag(bool, T),
@@ -233,6 +242,72 @@ impl<T> Setting<T> {
 impl<T> Namespaced<T> {
     fn primary_location(&self) -> &T {
         &self.member.1
+    }
+}
+
+impl From<Value<Span>> for GrmtoolsSectionValue {
+    fn from(value: Value<Span>) -> GrmtoolsSectionValue {
+        match value {
+            Value::Flag(value, value_span) => GrmtoolsSectionValue::Bool(value, value_span),
+            Value::Setting(setting) => match setting {
+                Setting::Array(v, start_span, end_span) => {
+                    let array_span = Span::new(start_span.start(), end_span.end());
+                    let mut out = Vec::with_capacity(v.capacity());
+                    for setting in v {
+                        // To Call this function recursively we need to convert the `Setting<Span>` to a `HeaderValue<Span>`
+                        out.push(GrmtoolsSectionValue::from(Value::Setting(setting)));
+                    }
+                    GrmtoolsSectionValue::Array(out, array_span)
+                }
+                Setting::String(s, val_span) => GrmtoolsSectionValue::String(s.clone(), val_span),
+                Setting::Num(n, val_span) => GrmtoolsSectionValue::Num(n, val_span),
+                Setting::Unitary(Namespaced {
+                    namespace,
+                    member: (member, member_span),
+                }) => {
+                    let mut s = String::new();
+                    let mut start_pos = member_span.start();
+                    if let Some((ns, ns_span)) = namespace {
+                        s.push_str(&ns);
+                        s.push_str("::");
+                        start_pos = ns_span.start();
+                    }
+                    s.push_str(&member);
+                    GrmtoolsSectionValue::RustLike(s, Span::new(start_pos, member_span.end()))
+                }
+                Setting::Constructor {
+                    ctor:
+                        Namespaced {
+                            namespace: ctor_namespace,
+                            member: (ctor_member, ctor_member_span),
+                        },
+                    arg:
+                        Namespaced {
+                            namespace: arg_namespace,
+                            member: (arg_member, arg_member_span),
+                        },
+                } => {
+                    let mut s = String::new();
+                    let mut ctor_start_pos = ctor_member_span.start();
+                    if let Some((ns, namespace_span)) = ctor_namespace {
+                        ctor_start_pos = namespace_span.start();
+                        s.push_str(&ns);
+                        s.push_str("::");
+                    }
+                    s.push_str(&ctor_member);
+                    s.push('(');
+                    if let Some((arg_ns, _)) = arg_namespace {
+                        s.push_str(&arg_ns);
+                    }
+                    s.push_str(&arg_member);
+                    s.push(')');
+                    GrmtoolsSectionValue::RustLike(
+                        s,
+                        Span::new(ctor_start_pos, arg_member_span.end()),
+                    )
+                }
+            },
+        }
     }
 }
 
