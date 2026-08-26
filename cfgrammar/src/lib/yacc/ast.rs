@@ -118,7 +118,7 @@ impl FromStr for ASTWithValidityInfo {
         let (header, _) = GrmtoolsSectionParser::new(src, true)
             .parse()
             .map_err(|mut errs| errs.drain(..).map(|e| e.into()).collect::<Vec<_>>())?;
-        if let Some(HeaderValue(_, yk_val)) = header.get("yacckind") {
+        if let Some(HeaderValue(_, yk_val)) = header.get("cfgrammar.yacckind") {
             let yacc_kind = YaccKind::try_from(yk_val).map_err(|e| vec![e.into()])?;
             let ast = {
                 // We don't want to strip off the header so that span's will be correct.
@@ -138,7 +138,7 @@ impl FromStr for ASTWithValidityInfo {
         } else {
             Err(vec![
                 HeaderError {
-                    kind: HeaderErrorKind::InvalidEntry("yacckind"),
+                    kind: HeaderErrorKind::InvalidEntry("cfgrammar.yacckind"),
                     locations: vec![Span::new(0, 0)],
                 }
                 .into(),

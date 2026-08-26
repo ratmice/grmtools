@@ -313,12 +313,12 @@ where
         &mut self,
         from_ast: Option<&ASTWithValidityInfo>,
     ) -> Result<ASTWithValidityInfo, ParserSrcEnvError> {
-        self.header.mark_used(&"yacckind".to_string());
+        self.header.mark_used(&"cfgrammar.yacckind".to_string());
         if let Some(ast) = from_ast {
             Ok(ast.clone())
         } else if let Some(yk) = self
             .header
-            .get("yacckind")
+            .get("cfgrammar.yacckind")
             .map(|HeaderValue(_, val)| val)
             .map(YaccKind::try_from)
             .transpose()?
@@ -332,10 +332,10 @@ where
     /// Looks up the `recoverer` field in the header, marks the field
     /// as used, and defaulting to `CPCTPlus` if unfound.
     fn resolve_recoverer(&mut self) -> Result<RecoveryKind, ParserSrcEnvError> {
-        self.header.mark_used(&"recoverer".to_string());
+        self.header.mark_used(&"lrpar.recoverer".to_string());
         let rk_val = self
             .header
-            .get("recoverer")
+            .get("lrpar.recoverer")
             .map(|HeaderValue(_, rk_val)| rk_val);
         if let Some(rk_val) = rk_val {
             Ok(RecoveryKind::try_from(rk_val)?)
@@ -348,10 +348,11 @@ where
     /// Looks up the `serialisation_format` field in the header, marks the field
     /// as used, and defaults to `VariableSizedInteger` if unfound.
     fn resolve_serialisation_format(&mut self) -> Result<SerialisationFormat, ParserSrcEnvError> {
-        self.header.mark_used(&"serialisation_format".to_string());
+        self.header
+            .mark_used(&"lrpar.serialisation_format".to_string());
         if let Some(ec_val) = self
             .header
-            .get("serialisation_format")
+            .get("lrpar.serialisation_format")
             .map(|HeaderValue(_, ec_val)| ec_val)
         {
             Ok(SerialisationFormat::try_from(ec_val)?)

@@ -178,11 +178,11 @@ fn main() {
         None => (),
         Some(s) => {
             header.set_merge_behavior(
-                &"recoverer".to_string(),
+                &"lrpar.recoverer".to_string(),
                 cfgrammar::markmap::MergeBehavior::Ours,
             );
             header.insert(
-                "recoverer".to_string(),
+                "lrpar.recoverer".to_string(),
                 HeaderValue(
                     Location::CommandLine,
                     Value::try_from(match &*s.to_lowercase() {
@@ -195,7 +195,7 @@ fn main() {
             );
         }
     };
-    let entry = match header.entry("yacckind".to_string()) {
+    let entry = match header.entry("cfgrammar.yacckind".to_string()) {
         Entry::Occupied(_) => unreachable!("Header should be empty"),
         Entry::Vacant(v) => v,
     };
@@ -236,7 +236,7 @@ fn main() {
     let yacc_y_path = PathBuf::from(&matches.free[1]);
     let yacc_src = read_file(&yacc_y_path);
     let yacc_diag = SpannedDiagnosticFormatter::new(&yacc_src, &yacc_y_path);
-    let yk_val = header.get("yacckind");
+    let yk_val = header.get("cfgrammar.yacckind");
     if yk_val.is_none() {
         let parsed_header = GrmtoolsSectionParser::new(&yacc_src, true).parse();
         match parsed_header {
@@ -257,7 +257,7 @@ fn main() {
             }
         }
     }
-    let yk_val = header.get("yacckind");
+    let yk_val = header.get("cfgrammar.yacckind");
     if yk_val.is_none() {
         eprintln!(
             "yacckind not specified in the %grmtools section of the grammar or via the '-y' parameter"
@@ -267,7 +267,7 @@ fn main() {
     let HeaderValue(_, yk_val) = yk_val.unwrap();
     let yacc_kind = YaccKind::try_from(yk_val).unwrap_or(YaccKind::Grmtools);
     let ast_validation = ASTWithValidityInfo::new(yacc_kind, &yacc_src);
-    let recoverykind = if let Some(HeaderValue(_, rk_val)) = header.get("recoverer") {
+    let recoverykind = if let Some(HeaderValue(_, rk_val)) = header.get("lrpar.recoverer") {
         match RecoveryKind::try_from(rk_val) {
             Err(e) => {
                 eprintln!(
@@ -551,7 +551,7 @@ where
             );
         } else {
             // If given no input paths, try to find some with `test_files` in the header.
-            match self.header.get("test_files") {
+            match self.header.get("lrpar.test_files") {
                 Some(HeaderValue(_, Value::Setting(Setting::Array(test_globs, _, _)))) => {
                     for setting in test_globs {
                         match setting {
@@ -564,7 +564,7 @@ where
                                         if glob_paths.peek().is_none() {
                                             return Err(NimbleparseError::Other(
                                                 format!(
-                                                    "'test_files' glob '{}' matched no paths",
+                                                    "'lrpar.test_files' glob '{}' matched no paths",
                                                     s
                                                 )
                                                 .to_string()
@@ -578,7 +578,7 @@ where
                                                 && ext.starts_with("grm")
                                             {
                                                 Err(NimbleparseError::Other(
-                                                        "test_files extensions beginning with `grm` are reserved."
+                                                        "lrpar.test_files extensions beginning with `grm` are reserved."
                                                         .into(),
                                                     ))?
                                             }
@@ -607,7 +607,7 @@ where
 
                             _ => {
                                 return Err(NimbleparseError::Other(
-                                    "Expected string values in `test_files`".into(),
+                                    "Expected string values in `lrpar.test_files`".into(),
                                 ));
                             }
                         }
@@ -615,7 +615,7 @@ where
                 }
                 Some(_) => {
                     return Err(NimbleparseError::Other(
-                        "Expected Array of string values in `test_files`".into(),
+                        "Expected Array of string values in `lrpar.test_files`".into(),
                     ));
                 }
                 None => {
@@ -631,7 +631,7 @@ where
             ));
         }
         let pb = RTParserBuilder::new(&self.grm, &self.stable).recoverer(self.recoverykind);
-        // Actually parse the given arguments or the `test_files` specified in the grammar.
+        // Actually parse the given arguments or the `lrpar.test_files` specified in the grammar.
         for input_path in paths {
             let input = read_file(&input_path);
             let lexer = self.lexerdef.lexer(&input);

@@ -95,8 +95,8 @@ fn main() -> Result<(), Box<dyn Error>> {
             process::exit(1);
         }
     };
-    header.mark_used(&"lexerkind".to_string());
-    let lexerkind = if let Some(HeaderValue(_, lk_val)) = header.get("lexerkind") {
+    header.mark_used(&"lrlex.lexerkind".to_string());
+    let lexerkind = if let Some(HeaderValue(_, lk_val)) = header.get("lrlex.lexerkind") {
         LexerKind::try_from(lk_val)?
     } else {
         LexerKind::LRNonStreamingLexer

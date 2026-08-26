@@ -1,6 +1,6 @@
 grammar: |
     %grmtools{
-        yacckind: Grmtools,
+        cfgrammar.yacckind: Grmtools,
         recoverer: RecoveryKind::CPCTPlus,
         test_files: ["*.input_grmtools_section"]
     }
@@ -19,6 +19,15 @@ grammar: |
     val_seq -> Result<Header<Span>, Vec<HeaderError<Span>>>
     : valbind {
         let ((key, key_loc), val) = $1;
+        let key = if !RE_CRATE_DOT.is_match(&key) {
+            if let Some(crate_name) = CRATE_KEY_MAP.get(key.as_str()) {
+                format!("{crate_name}.{key}")
+            } else {
+                key
+            }
+        } else {
+            key
+        };
         let mut ret = Header::<Span>::new();
         match ret.entry(key) {
             Entry::Occupied(orig) => {
@@ -38,6 +47,15 @@ grammar: |
     }
     | val_seq ',' valbind {
         let ((key, key_loc), val) = $3;
+        let key = if !RE_CRATE_DOT.is_match(&key) {
+            if let Some(crate_name) = CRATE_KEY_MAP.get(key.as_str()) {
+                format!("{crate_name}.{key}")
+            } else {
+                key
+            }
+        } else {
+            key
+        };
         let mut ret = $1?;
         match ret.entry(key) {
             Entry::Occupied(orig) => {
@@ -144,8 +162,15 @@ grammar: |
             Namespaced,
             Header,
             HeaderValue,
+            CRATE_KEY_MAP,
+            RE_CRATE_DOT,
         },
         markmap::Entry,
+    };
+
+    use std::{
+        collections::HashMap,
+        sync::LazyLock
     };
 
 lexer: |
@@ -153,7 +178,7 @@ lexer: |
     %%
     %grmtools 'MAGIC'
     ! '!'
-    [A-Z][A-Z_]* 'IDENT'
+    [A-Z][A-Z_\.]* 'IDENT'
     [0-9]+ 'NUM'
     , ','
     \{ '{'

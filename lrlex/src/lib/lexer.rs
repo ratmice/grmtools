@@ -64,9 +64,9 @@ impl<T: Clone> TryFrom<&mut Header<T>> for LexFlags {
             nest_limit,
         } = &mut lex_flags;
         macro_rules! cvt_flag {
-            ($it:ident) => {
-                header.mark_used(&stringify!($it).to_string());
-                *$it = match header.get(stringify!($it)) {
+            ($prefix:ident, $it:ident) => {
+                header.mark_used(&stringify!($prefix.$it).to_string());
+                *$it = match header.get(stringify!($prefix.$it)) {
                     Some(HeaderValue(_, Value::Flag(flag, _))) => Some(*flag),
                     Some(HeaderValue(loc, _)) => Err(HeaderError {
                         kind: HeaderErrorKind::ConversionError("LexFlags", "Expected boolean"),
@@ -76,19 +76,19 @@ impl<T: Clone> TryFrom<&mut Header<T>> for LexFlags {
                 }
             };
         }
-        cvt_flag!(dot_matches_new_line);
-        cvt_flag!(multi_line);
-        cvt_flag!(octal);
-        cvt_flag!(posix_escapes);
-        cvt_flag!(allow_wholeline_comments);
-        cvt_flag!(case_insensitive);
-        cvt_flag!(swap_greed);
-        cvt_flag!(ignore_whitespace);
-        cvt_flag!(unicode);
+        cvt_flag!(regex, dot_matches_new_line);
+        cvt_flag!(regex, multi_line);
+        cvt_flag!(regex, octal);
+        cvt_flag!(lrlex, posix_escapes);
+        cvt_flag!(lrlex, allow_wholeline_comments);
+        cvt_flag!(regex, case_insensitive);
+        cvt_flag!(regex, swap_greed);
+        cvt_flag!(regex, ignore_whitespace);
+        cvt_flag!(regex, unicode);
         macro_rules! cvt_num {
-            ($it:ident, $num_ty: ty) => {
-                header.mark_used(&stringify!($it).to_string());
-                *$it = match header.get(stringify!($it)) {
+            ($prefix:ident, $it:ident, $num_ty: ty) => {
+                header.mark_used(&stringify!($prefix.$it).to_string());
+                *$it = match header.get(stringify!($prefix.$it)) {
                     Some(HeaderValue(_, Value::Setting(Setting::Num(n, _)))) => Some(*n as $num_ty),
                     Some(HeaderValue(loc, _)) => Err(HeaderError {
                         kind: HeaderErrorKind::ConversionError("LexFlags", "Expected numeric"),
@@ -98,9 +98,9 @@ impl<T: Clone> TryFrom<&mut Header<T>> for LexFlags {
                 }
             };
         }
-        cvt_num!(size_limit, usize);
-        cvt_num!(dfa_size_limit, usize);
-        cvt_num!(nest_limit, u32);
+        cvt_num!(regex, size_limit, usize);
+        cvt_num!(regex, dfa_size_limit, usize);
+        cvt_num!(regex, nest_limit, u32);
         Ok(lex_flags)
     }
 }

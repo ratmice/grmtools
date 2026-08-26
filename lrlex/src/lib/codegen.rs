@@ -196,11 +196,11 @@ where
     {
         self.merge_headers()?;
         let mod_name = self.resolve_mod_name(&args)?;
-        self.header.mark_used(&"lexerkind".to_string());
+        self.header.mark_used(&"lrlex.lexerkind".to_string());
         let lexerkind = match args.lexerkind {
             Some(lexerkind) => lexerkind,
             None => {
-                if let Some(HeaderValue(_, lk_val)) = self.header.get("lexerkind") {
+                if let Some(HeaderValue(_, lk_val)) = self.header.get("lrlex.lexerkind") {
                     LexerKind::try_from(lk_val)?
                 } else {
                     LexerKind::LRNonStreamingLexer
