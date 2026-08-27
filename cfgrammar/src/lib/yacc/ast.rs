@@ -1153,6 +1153,76 @@ start: "a" { () };
         assert_eq!(cfgrammar_crate_parsed, cfgrammar_crate_expected);
     }
 
+    #[test]
+    fn test_grmtools_section_values3() {
+        use super::*;
+        let src = r#"
+%grmtools {
+   yacckind: YaccKind::Original(YaccOriginalActionKind::UserAction),
+}
+%token a
+%actiontype ()
+%%
+start: "a" { () };
+"#;
+        let ast_validity = ASTWithValidityInfo::from_str(src).unwrap();
+        let mut cfgrammar_crate_expected = HashMap::new();
+        let yacckind_span = src.find_span("yacckind");
+        let yacckind_val_span = src.find_span("YaccKind::Original(YaccOriginalActionKind::UserAction)");
+        cfgrammar_crate_expected.insert(
+            "cfgrammar.yacckind".to_string(),
+            (
+                yacckind_span,
+                // The actual value we receive has been lower cased
+                GrmtoolsSectionValue::RustLike(
+                    "yacckind::original(yaccoriginalactionkind::useraction)".to_string(),
+                    yacckind_val_span,
+                ),
+            ),
+        );
+        let cfgrammar_crate_parsed = ast_validity
+            .ast()
+            .grmtools_section_values_for_crate("cfgrammar")
+            .map(|(key, (key_span, val))| (key.clone(), (*key_span, val.clone())))
+            .collect::<HashMap<_, _>>();
+        assert_eq!(cfgrammar_crate_parsed, cfgrammar_crate_expected);
+    }
+
+        #[test]
+    fn test_grmtools_section_values4() {
+        use super::*;
+        let src = r#"
+%grmtools {
+   yacckind: YaccKind::Original(UserAction),
+}
+%token a
+%actiontype ()
+%%
+start: "a" { () };
+"#;
+        let ast_validity = ASTWithValidityInfo::from_str(src).unwrap();
+        let mut cfgrammar_crate_expected = HashMap::new();
+        let yacckind_span = src.find_span("yacckind");
+        let yacckind_val_span = src.find_span("YaccKind::Original(UserAction)");
+        cfgrammar_crate_expected.insert(
+            "cfgrammar.yacckind".to_string(),
+            (
+                yacckind_span,
+                // The actual value we receive has been lower cased
+                GrmtoolsSectionValue::RustLike(
+                    "yacckind::original(useraction)".to_string(),
+                    yacckind_val_span,
+                ),
+            ),
+        );
+        let cfgrammar_crate_parsed = ast_validity
+            .ast()
+            .grmtools_section_values_for_crate("cfgrammar")
+            .map(|(key, (key_span, val))| (key.clone(), (*key_span, val.clone())))
+            .collect::<HashMap<_, _>>();
+        assert_eq!(cfgrammar_crate_parsed, cfgrammar_crate_expected);
+    }
+
     trait FindSpan {
         fn find_span(&self, s: &str) -> Span;
     }
