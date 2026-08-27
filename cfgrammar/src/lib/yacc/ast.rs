@@ -548,18 +548,19 @@ impl GrammarAST {
             )
     }
 
-    pub fn grmtools_section_values(
-        &self,
-    ) -> impl Iterator<Item = (&String, &(Span, GrmtoolsSectionValue))> {
-        self.grmtools_section.iter()
-    }
-
+    /// Returns the entries from the grmtools section with keys that are prefixed with the `crate_name`
+    /// followed by a dot. If `crate_name` is empty returns all entries for all crates.
     pub fn grmtools_section_values_for_crate(
         &self,
         crate_name: &str,
     ) -> impl Iterator<Item = (&String, &(Span, GrmtoolsSectionValue))> {
-        self.grmtools_section_values()
-            .filter(move |(key, _)| key.starts_with(&format!("{crate_name}.")))
+        self.grmtools_section.iter().filter(move |(key, _)| {
+            if !crate_name.is_empty() {
+                key.starts_with(&format!("{crate_name}."))
+            } else {
+                true
+            }
+        })
     }
 }
 
