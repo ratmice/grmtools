@@ -254,7 +254,7 @@ impl From<Value<Span>> for GrmtoolsSectionValue {
                     let array_span = Span::new(start_span.start(), end_span.end());
                     let mut out = Vec::with_capacity(v.capacity());
                     for setting in v {
-                        // To Call this function recursively we need to convert the `Setting<Span>` to a `HeaderValue<Span>`
+                        // To call this function recursively we need to convert the `Setting<Span>` to a `Value<Span>`
                         out.push(GrmtoolsSectionValue::from(Value::Setting(setting)));
                     }
                     GrmtoolsSectionValue::Array(out, array_span)
