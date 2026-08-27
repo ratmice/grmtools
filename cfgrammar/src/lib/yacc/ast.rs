@@ -1008,7 +1008,7 @@ start -> () : "a" {$;;;; };
         use super::*;
         let src = r#"
 %grmtools {
-   YaccKind: Grmtools,
+   yacckind: Grmtools,
    lrpar.recoverer: CPCTPlus,
    test.Flag,
    !test.Negative,
@@ -1034,16 +1034,14 @@ start -> () : "a" { () };
         let test_num_val_span = src.find_span("1234");
         let mut test_crate_expected = HashMap::new();
         test_crate_expected.insert(
-            // Note the case difference.
-            "test.flag".to_string(),
+            "test.Flag".to_string(),
             (
                 test_flag_span,
                 GrmtoolsSectionValue::Bool(true, test_flag_span),
             ),
         );
         test_crate_expected.insert(
-            // Note the case difference.
-            "test.negative".to_string(),
+            "test.Negative".to_string(),
             (
                 test_neg_span,
                 GrmtoolsSectionValue::Bool(false, test_neg_val_span),
@@ -1084,14 +1082,14 @@ start -> () : "a" { () };
         assert_eq!(test_crate_parsed, test_crate_expected);
 
         let mut cfgrammar_crate_expected = HashMap::new();
-        let yacckind_span = src.find_span("YaccKind");
+        let yacckind_span = src.find_span("yacckind");
         let yacckind_val_span = src.find_span("Grmtools");
         cfgrammar_crate_expected.insert(
             "cfgrammar.yacckind".to_string(),
             (
                 yacckind_span,
                 // The actual value we receive has been lower cased
-                GrmtoolsSectionValue::RustLike("grmtools".to_string(), yacckind_val_span),
+                GrmtoolsSectionValue::RustLike("Grmtools".to_string(), yacckind_val_span),
             ),
         );
         let cfgrammar_crate_parsed = ast_validity
@@ -1108,8 +1106,7 @@ start -> () : "a" { () };
             "lrpar.recoverer".to_string(),
             (
                 recoverer_span,
-                // The actual value we receive has been lower cased
-                GrmtoolsSectionValue::RustLike("cpctplus".to_string(), recoverer_val_span),
+                GrmtoolsSectionValue::RustLike("CPCTPlus".to_string(), recoverer_val_span),
             ),
         );
         let lrpar_crate_parsed = ast_validity
@@ -1140,9 +1137,8 @@ start: "a" { () };
             "cfgrammar.yacckind".to_string(),
             (
                 yacckind_span,
-                // The actual value we receive has been lower cased
                 GrmtoolsSectionValue::RustLike(
-                    "original(yaccoriginalactionkind::useraction)".to_string(),
+                    "Original(YaccOriginalActionKind::UserAction)".to_string(),
                     yacckind_val_span,
                 ),
             ),
@@ -1175,9 +1171,8 @@ start: "a" { () };
             "cfgrammar.yacckind".to_string(),
             (
                 yacckind_span,
-                // The actual value we receive has been lower cased
                 GrmtoolsSectionValue::RustLike(
-                    "yacckind::original(yaccoriginalactionkind::useraction)".to_string(),
+                    "YaccKind::Original(YaccOriginalActionKind::UserAction)".to_string(),
                     yacckind_val_span,
                 ),
             ),
@@ -1210,9 +1205,8 @@ start: "a" { () };
             "cfgrammar.yacckind".to_string(),
             (
                 yacckind_span,
-                // The actual value we receive has been lower cased
                 GrmtoolsSectionValue::RustLike(
-                    "yacckind::original(useraction)".to_string(),
+                    "YaccKind::Original(UserAction)".to_string(),
                     yacckind_val_span,
                 ),
             ),

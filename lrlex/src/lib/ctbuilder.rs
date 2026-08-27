@@ -98,7 +98,7 @@ impl<T: Clone> TryFrom<&Value<T>> for LexerKind {
                 member: (member, member_loc),
             })) => {
                 if let Some((ns, loc)) = namespace
-                    && ns.to_lowercase() != "lexerkind"
+                    && ns != "LexerKind"
                 {
                     return Err(HeaderError {
                         kind: HeaderErrorKind::ConversionError(
@@ -1286,9 +1286,7 @@ mod test {
     fn test_grmtools_section_lexerkind() {
         let lexerkinds = [
             "LRNonStreamingLexer",
-            "lrnonstreaminglexer",
-            "LexerKind::lrnonstreaminglexer",
-            "lexerkind::LRNonStreamingLexer",
+            "LexerKind::LRNonStreamingLexer",
         ];
         for (i, kind) in lexerkinds.iter().enumerate() {
             let lex_src = format!(

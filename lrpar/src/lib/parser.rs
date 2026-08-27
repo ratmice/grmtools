@@ -667,7 +667,7 @@ impl TryFrom<&Value<Location>> for RecoveryKind {
                 member: (kind, kind_loc),
             })) => {
                 match namespace {
-                    Some((ns, loc)) if ns.to_lowercase() != "recoverykind" => {
+                    Some((ns, loc)) if ns != "RecoveryKind" => {
                         return Err(HeaderError {
                             kind: HeaderErrorKind::ConversionError(
                                 "RecoveryKind",
@@ -678,9 +678,9 @@ impl TryFrom<&Value<Location>> for RecoveryKind {
                     }
                     _ => {}
                 }
-                match kind.to_lowercase().as_ref() {
-                    "cpctplus" => Ok(RecoveryKind::CPCTPlus),
-                    "none" => Ok(RecoveryKind::None),
+                match kind.as_ref() {
+                    "CPCTPlus" => Ok(RecoveryKind::CPCTPlus),
+                    "None" => Ok(RecoveryKind::None),
                     _ => Err(HeaderError {
                         kind: HeaderErrorKind::ConversionError("RecoveryKind", "Unknown variant"),
                         locations: vec![kind_loc.clone()],
@@ -1367,7 +1367,7 @@ Call: 'ID' '(' ')';";
 \* '*'
 "#;
         let grammar_src = "
-%grmtools{YaccKind: Original(NoAction)}
+%grmtools{yacckind: Original(NoAction)}
 %start Expr
 %%
 Expr : Expr '+' Term | Term;

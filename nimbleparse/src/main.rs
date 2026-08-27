@@ -185,9 +185,9 @@ fn main() {
                 "lrpar.recoverer".to_string(),
                 HeaderValue(
                     Location::CommandLine,
-                    Value::try_from(match &*s.to_lowercase() {
-                        "cpctplus" => RecoveryKind::CPCTPlus,
-                        "none" => RecoveryKind::None,
+                    Value::try_from(match &*s {
+                        "CPCTPlus" => RecoveryKind::CPCTPlus,
+                        "None" => RecoveryKind::None,
                         _ => usage(prog, &format!("Unknown recoverer '{}'.", s)),
                     })
                     .expect("All these RecoveryKinds should convert without error"),
@@ -204,10 +204,10 @@ fn main() {
         Some(s) => {
             entry.insert_entry(HeaderValue(
                 Location::CommandLine,
-                Value::try_from(match &*s.to_lowercase() {
-                    "eco" => YaccKind::Eco,
-                    "grmtools" => YaccKind::Grmtools,
-                    "original" => YaccKind::Original(YaccOriginalActionKind::GenericParseTree),
+                Value::try_from(match &*s {
+                    "Eco" => YaccKind::Eco,
+                    "Grmtools" => YaccKind::Grmtools,
+                    "Original" => YaccKind::Original(YaccOriginalActionKind::GenericParseTree),
                     _ => usage(prog, &format!("Unknown Yacc variant '{}'.", s)),
                 })
                 .expect("All these yacckinds should convert without error"),

@@ -629,7 +629,7 @@ impl<'input> GrmtoolsSectionParser<'input> {
             Some(m) => {
                 assert_eq!(m.start(), 0);
                 Ok((
-                    self.src[i..i + m.end()].to_string().to_lowercase(),
+                    self.src[i..i + m.end()].to_string(),
                     i + m.end(),
                 ))
             }
@@ -678,30 +678,30 @@ impl TryFrom<YaccKind> for Value<Location> {
         let from_loc = Location::Other("From<YaccKind>".to_string());
         Ok(match kind {
             YaccKind::Grmtools => Value::Setting(Setting::Unitary(Namespaced {
-                namespace: Some(("yacckind".to_string(), from_loc.clone())),
-                member: ("grmtools".to_string(), from_loc),
+                namespace: Some(("YaccKind".to_string(), from_loc.clone())),
+                member: ("Grmtools".to_string(), from_loc),
             })),
             YaccKind::Eco => Value::Setting(Setting::Unitary(Namespaced {
-                namespace: Some(("yacckind".to_string(), from_loc.clone())),
-                member: ("eco".to_string(), from_loc),
+                namespace: Some(("YaccKind".to_string(), from_loc.clone())),
+                member: ("Eco".to_string(), from_loc),
             })),
             YaccKind::Original(action_kind) => Value::Setting(Setting::Constructor {
                 ctor: Namespaced {
-                    namespace: Some(("yacckind".to_string(), from_loc.clone())),
-                    member: ("original".to_string(), from_loc.clone()),
+                    namespace: Some(("YaccKind".to_string(), from_loc.clone())),
+                    member: ("Original".to_string(), from_loc.clone()),
                 },
                 arg: match action_kind {
                     YaccOriginalActionKind::NoAction => Namespaced {
-                        namespace: Some(("yaccoriginalactionkind".to_string(), from_loc.clone())),
-                        member: ("noaction".to_string(), from_loc),
+                        namespace: Some(("YaccOriginalActionKind".to_string(), from_loc.clone())),
+                        member: ("NoAction".to_string(), from_loc),
                     },
                     YaccOriginalActionKind::UserAction => Namespaced {
-                        namespace: Some(("yaccoriginalactionkind".to_string(), from_loc.clone())),
-                        member: ("useraction".to_string(), from_loc),
+                        namespace: Some(("YaccOriginalActionKind".to_string(), from_loc.clone())),
+                        member: ("UserAction".to_string(), from_loc),
                     },
                     YaccOriginalActionKind::GenericParseTree => Namespaced {
-                        namespace: Some(("yaccoriginalactionkind".to_string(), from_loc.clone())),
-                        member: ("genericparsetree".to_string(), from_loc),
+                        namespace: Some(("YaccOriginalActionKind".to_string(), from_loc.clone())),
+                        member: ("GenericParseTree".to_string(), from_loc),
                     },
                 },
             }),
@@ -719,13 +719,13 @@ impl<T: Clone> TryFrom<&Value<T>> for YaccKind {
                 member: (yk_value, yk_value_loc),
             })) => {
                 if let Some((ns, ns_loc)) = namespace
-                    && ns != "yacckind"
+                    && ns != "YaccKind"
                 {
                     err_locs.push(ns_loc.clone());
                 }
                 let yacckinds = [
-                    ("grmtools".to_string(), YaccKind::Grmtools),
-                    ("eco".to_string(), YaccKind::Eco),
+                    ("Grmtools".to_string(), YaccKind::Grmtools),
+                    ("Eco".to_string(), YaccKind::Eco),
                 ];
                 let yk_found = yacckinds
                     .iter()
@@ -760,24 +760,24 @@ impl<T: Clone> TryFrom<&Value<T>> for YaccKind {
                     },
             }) => {
                 if let Some((yk_ns, yk_ns_loc)) = yk_namespace
-                    && yk_ns != "yacckind"
+                    && yk_ns != "YaccKind"
                 {
                     err_locs.push(yk_ns_loc.clone());
                 }
 
-                if yk_str != "original" {
+                if yk_str != "Original" {
                     err_locs.push(yk_loc.clone());
                 }
 
                 if let Some((ak_ns, ak_ns_loc)) = ak_namespace
-                    && ak_ns != "yaccoriginalactionkind"
+                    && ak_ns != "YaccOriginalActionKind"
                 {
                     err_locs.push(ak_ns_loc.clone());
                 }
                 let actionkinds = [
-                    ("noaction", YaccOriginalActionKind::NoAction),
-                    ("useraction", YaccOriginalActionKind::UserAction),
-                    ("genericparsetree", YaccOriginalActionKind::GenericParseTree),
+                    ("NoAction", YaccOriginalActionKind::NoAction),
+                    ("UserAction", YaccOriginalActionKind::UserAction),
+                    ("GenericParseTree", YaccOriginalActionKind::GenericParseTree),
                 ];
                 let yk_found = actionkinds.iter().find_map(|(actionkind_str, actionkind)| {
                     (ak_str == actionkind_str).then_some(YaccKind::Original(*actionkind))

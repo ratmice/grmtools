@@ -141,13 +141,13 @@ impl TryFrom<SerialisationFormat> for Value<Location> {
         let from_loc = Location::Other("From<SerialisationFormat>".to_string());
         Ok(match kind {
             SerialisationFormat::FixedSizeInteger => Value::Setting(Setting::Unitary(Namespaced {
-                namespace: Some(("serialisationformat".to_string(), from_loc.clone())),
-                member: ("fixedsizeinteger".to_string(), from_loc),
+                namespace: Some(("SerialisationFormat".to_string(), from_loc.clone())),
+                member: ("FixedSizeInteger".to_string(), from_loc),
             })),
             SerialisationFormat::VariableSizedInteger => {
                 Value::Setting(Setting::Unitary(Namespaced {
-                    namespace: Some(("serialisationformat".to_string(), from_loc.clone())),
-                    member: ("variablesizedinteger".to_string(), from_loc),
+                    namespace: Some(("SerialisationFormat".to_string(), from_loc.clone())),
+                    member: ("VariableSizedInteger".to_string(), from_loc),
                 }))
             }
         })
@@ -165,17 +165,17 @@ impl<T: Clone + Debug> TryFrom<&Value<T>> for SerialisationFormat {
                 member: (enc_value, enc_value_loc),
             })) => {
                 if let Some((ns, ns_loc)) = namespace
-                    && ns != "serialisationformat"
+                    && ns != "SerialisationFormat"
                 {
                     err_locs.push(ns_loc.clone());
                 }
                 let encodings = [
                     (
-                        "fixedsizeinteger".to_string(),
+                        "FixedSizeInteger".to_string(),
                         SerialisationFormat::FixedSizeInteger,
                     ),
                     (
-                        "variablesizedinteger".to_string(),
+                        "VariableSizedInteger".to_string(),
                         SerialisationFormat::VariableSizedInteger,
                     ),
                 ];

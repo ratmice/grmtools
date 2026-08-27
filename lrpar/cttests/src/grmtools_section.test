@@ -78,7 +78,7 @@ grammar: |
     namespaced -> Namespaced<Span>
     : IDENT {
         let ident_span = $1.as_ref().unwrap().span();
-        let ident = $lexer.span_str(ident_span).to_string().to_lowercase();
+        let ident = $lexer.span_str(ident_span).to_string();
         Namespaced{
             namespace: None,
             member: (ident, ident_span)
@@ -86,10 +86,10 @@ grammar: |
     }
     | IDENT '::' IDENT {
         let namespace_span = $1.as_ref().unwrap().span();
-        let namespace = $lexer.span_str(namespace_span).to_string().to_lowercase();
+        let namespace = $lexer.span_str(namespace_span).to_string();
 
         let ident_span = $3.as_ref().unwrap().span();
-        let ident = $lexer.span_str(ident_span).to_string().to_lowercase();
+        let ident = $lexer.span_str(ident_span).to_string();
         Namespaced {
             namespace: Some((namespace, namespace_span)),
             member: (ident, ident_span)
@@ -100,18 +100,18 @@ grammar: |
     valbind -> ((String, Span), Value<Span>)
     : IDENT ':' val {
         let key_span = $1.as_ref().unwrap().span();
-        let key = $lexer.span_str(key_span).to_string().to_lowercase();
+        let key = $lexer.span_str(key_span).to_string();
         ((key, key_span), Value::Setting($3))
     }
     | IDENT {
         let key_span = $1.as_ref().unwrap().span();
-        let key = $lexer.span_str(key_span).to_string().to_lowercase();
+        let key = $lexer.span_str(key_span).to_string();
         ((key, key_span), Value::Flag(true, key_span))
     }
     | '!' IDENT {
         let bang_span = $1.as_ref().unwrap().span();
         let key_span = $2.as_ref().unwrap().span();
-        let key = $lexer.span_str(key_span).to_string().to_lowercase();
+        let key = $lexer.span_str(key_span).to_string();
         ((key, key_span), Value::Flag(false, Span::new(bang_span.start(), key_span.end())))
     }
     ;
