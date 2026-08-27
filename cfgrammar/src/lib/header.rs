@@ -298,12 +298,13 @@ impl From<Value<Span>> for GrmtoolsSectionValue {
                     s.push('(');
                     if let Some((arg_ns, _)) = arg_namespace {
                         s.push_str(&arg_ns);
+                        s.push_str("::");
                     }
                     s.push_str(&arg_member);
                     s.push(')');
                     GrmtoolsSectionValue::RustLike(
                         s,
-                        Span::new(ctor_start_pos, arg_member_span.end()),
+                        Span::new(ctor_start_pos, arg_member_span.end() + ")".len()),
                     )
                 }
             },
