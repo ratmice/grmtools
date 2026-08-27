@@ -1008,10 +1008,10 @@ start -> () : "a" {$;;;; };
         use super::*;
         let src = r#"
 %grmtools {
-   yacckind: Grmtools,
+   YaccKind: Grmtools,
    lrpar.recoverer: CPCTPlus,
-   test.flag,
-   !test.negative,
+   test.Flag,
+   !test.Negative,
    test.string: "Foo",
    test.vec: ["Aaaa", "Bbbb"],
    test.num: 1234,
@@ -1021,9 +1021,9 @@ start -> () : "a" {$;;;; };
 start -> () : "a" { () };
 "#;
         let ast_validity = ASTWithValidityInfo::from_str(src).unwrap();
-        let test_flag_span = src.find_span("test.flag");
-        let test_neg_span = src.find_span("test.negative");
-        let test_neg_val_span = src.find_span("!test.negative");
+        let test_flag_span = src.find_span("test.Flag");
+        let test_neg_span = src.find_span("test.Negative");
+        let test_neg_val_span = src.find_span("!test.Negative");
         let test_string_span = src.find_span("test.string");
         let test_string_val_span = src.find_span("Foo");
         let test_vec_span = src.find_span("test.vec");
@@ -1034,6 +1034,7 @@ start -> () : "a" { () };
         let test_num_val_span = src.find_span("1234");
         let mut test_crate_expected = HashMap::new();
         test_crate_expected.insert(
+            // Note the case difference.
             "test.flag".to_string(),
             (
                 test_flag_span,
@@ -1041,6 +1042,7 @@ start -> () : "a" { () };
             ),
         );
         test_crate_expected.insert(
+            // Note the case difference.
             "test.negative".to_string(),
             (
                 test_neg_span,
@@ -1082,7 +1084,7 @@ start -> () : "a" { () };
         assert_eq!(test_crate_parsed, test_crate_expected);
 
         let mut cfgrammar_crate_expected = HashMap::new();
-        let yacckind_span = src.find_span("yacckind");
+        let yacckind_span = src.find_span("YaccKind");
         let yacckind_val_span = src.find_span("Grmtools");
         cfgrammar_crate_expected.insert(
             "cfgrammar.yacckind".to_string(),
@@ -1228,6 +1230,7 @@ start: "a" { () };
     }
 
     impl FindSpan for &'_ str {
+        #[track_caller]
         fn find_span(&self, s: &str) -> Span {
             let start_pos = self.find(s).unwrap();
             Span::new(start_pos, start_pos + s.len())
