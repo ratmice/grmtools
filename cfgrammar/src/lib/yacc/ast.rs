@@ -1002,4 +1002,168 @@ start -> () : "a" {$;;;; };
             }]
         );
     }
+
+    #[test]
+    fn test_grmtools_section() {
+        use super::*;
+        let src = r#"
+%grmtools {
+   yacckind: Grmtools,
+   lrpar.recoverer: CPCTPlus,
+   test.flag,
+   !test.negative,
+   test.string: "Foo",
+   test.vec: ["Aaaa", "Bbbb"],
+   test.num: 1234,
+}
+%token a
+%%
+start -> () : "a" { () };
+"#;
+        let ast_validity = ASTWithValidityInfo::new(YaccKind::Grmtools, src);
+        let test_flag_span_start = src.find("test.flag").unwrap();
+        let test_flag_span = Span::new(
+            test_flag_span_start,
+            test_flag_span_start + "test.flag".len(),
+        );
+        let test_neg_span_start = src.find("test.negative").unwrap();
+        let test_neg_span = Span::new(
+            test_neg_span_start,
+            test_neg_span_start + "test.negative".len(),
+        );
+        let test_string_span_start = src.find("test.string").unwrap();
+        let test_string_span = Span::new(
+            test_string_span_start,
+            test_string_span_start + "test.string".len(),
+        );
+        let test_string_val_span_start = src.find("Foo").unwrap();
+        let test_string_val_span = Span::new(
+            test_string_val_span_start,
+            test_string_val_span_start + "Foo".len(),
+        );
+        let test_vec_span_start = src.find("test.vec").unwrap();
+        let test_vec_span = Span::new(test_vec_span_start, test_vec_span_start + "test.vec".len());
+        let test_vec_a_span_start = src.find("Aaaa").unwrap();
+        let test_vec_a_span =
+            Span::new(test_vec_a_span_start, test_vec_a_span_start + "Aaaa".len());
+        let test_vec_b_span_start = src.find("Bbbb").unwrap();
+        let test_vec_b_span =
+            Span::new(test_vec_b_span_start, test_vec_b_span_start + "Bbbb".len());
+        let test_vec_val_span_start = src.find("[\"Aaaa\", \"Bbbb\"]").unwrap();
+        let test_vec_val_span = Span::new(
+            test_vec_val_span_start,
+            test_vec_val_span_start + "[\"Aaaa\", \"Bbbb\"]".len(),
+        );
+        let test_num_span_start = src.find("test.num").unwrap();
+        let test_num_span = Span::new(test_num_span_start, test_num_span_start + "test.num".len());
+        let test_num_val_span_start = src.find("1234").unwrap();
+        let test_num_val_span = Span::new(
+            test_num_val_span_start,
+            test_num_val_span_start + "1234".len(),
+        );
+
+        let mut test_crate_expected = HashMap::new();
+        test_crate_expected.insert(
+            "test.flag".to_string(),
+            (
+                test_flag_span,
+                GrmtoolsSectionValue::Bool(true, test_flag_span),
+            ),
+        );
+        test_crate_expected.insert(
+            "test.negative".to_string(),
+            (
+                test_neg_span,
+                GrmtoolsSectionValue::Bool(
+                    false,
+                    Span::new(
+                        test_neg_span_start - 1,
+                        test_neg_span_start + "test.negative".len(),
+                    ),
+                ),
+            ),
+        );
+        test_crate_expected.insert(
+            "test.string".to_string(),
+            (
+                test_string_span,
+                GrmtoolsSectionValue::String("Foo".to_string(), test_string_val_span),
+            ),
+        );
+        test_crate_expected.insert(
+            "test.vec".to_string(),
+            (
+                test_vec_span,
+                GrmtoolsSectionValue::Array(
+                    vec![
+                        GrmtoolsSectionValue::String("Aaaa".to_string(), test_vec_a_span),
+                        GrmtoolsSectionValue::String("Bbbb".to_string(), test_vec_b_span),
+                    ],
+                    test_vec_val_span,
+                ),
+            ),
+        );
+        test_crate_expected.insert(
+            "test.num".to_string(),
+            (
+                test_num_span,
+                GrmtoolsSectionValue::Num(1234, test_num_val_span),
+            ),
+        );
+        let test_crate_parsed = ast_validity
+            .ast()
+            .grmtools_section_values_for_crate("test")
+            .map(|(key, (key_span, val))| (key.clone(), (*key_span, val.clone())))
+            .collect::<HashMap<_, _>>();
+        assert_eq!(test_crate_parsed, test_crate_expected);
+
+        let mut cfgrammar_crate_expected = HashMap::new();
+        let yacckind_span_start = src.find("yacckind").unwrap();
+        let yacckind_span = Span::new(yacckind_span_start, yacckind_span_start + "yacckind".len());
+        let yacckind_val_span_start = src.find("Grmtools").unwrap();
+        let yacckind_val_span = Span::new(
+            yacckind_val_span_start,
+            yacckind_val_span_start + "Grmtools".len(),
+        );
+        cfgrammar_crate_expected.insert(
+            "cfgrammar.yacckind".to_string(),
+            (
+                yacckind_span,
+                // The actual value we receive has been lower cased
+                GrmtoolsSectionValue::RustLike("grmtools".to_string(), yacckind_val_span),
+            ),
+        );
+        let cfgrammar_crate_parsed = ast_validity
+            .ast()
+            .grmtools_section_values_for_crate("cfgrammar")
+            .map(|(key, (key_span, val))| (key.clone(), (*key_span, val.clone())))
+            .collect::<HashMap<_, _>>();
+        assert_eq!(cfgrammar_crate_parsed, cfgrammar_crate_expected);
+
+        let mut lrpar_crate_expected = HashMap::new();
+        let recoverer_span_start = src.find("lrpar.recoverer").unwrap();
+        let recoverer_span = Span::new(
+            recoverer_span_start,
+            recoverer_span_start + "lrpar.recoverer".len(),
+        );
+        let recoverer_val_span_start = src.find("CPCTPlus").unwrap();
+        let recoverer_val_span = Span::new(
+            recoverer_val_span_start,
+            recoverer_val_span_start + "CPCTPlus".len(),
+        );
+        lrpar_crate_expected.insert(
+            "lrpar.recoverer".to_string(),
+            (
+                recoverer_span,
+                // The actual value we receive has been lower cased
+                GrmtoolsSectionValue::RustLike("cpctplus".to_string(), recoverer_val_span),
+            ),
+        );
+        let lrpar_crate_parsed = ast_validity
+            .ast()
+            .grmtools_section_values_for_crate("lrpar")
+            .map(|(key, (key_span, val))| (key.clone(), (*key_span, val.clone())))
+            .collect::<HashMap<_, _>>();
+        assert_eq!(lrpar_crate_parsed, lrpar_crate_expected);
+    }
 }
