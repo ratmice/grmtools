@@ -1284,10 +1284,7 @@ mod test {
     use super::{CTLexerBuilder, LexerKind};
     #[test]
     fn test_grmtools_section_lexerkind() {
-        let lexerkinds = [
-            "LRNonStreamingLexer",
-            "LexerKind::LRNonStreamingLexer",
-        ];
+        let lexerkinds = ["LRNonStreamingLexer", "LexerKind::LRNonStreamingLexer"];
         for (i, kind) in lexerkinds.iter().enumerate() {
             let lex_src = format!(
                 "

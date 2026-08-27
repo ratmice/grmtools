@@ -1166,7 +1166,8 @@ start: "a" { () };
         let ast_validity = ASTWithValidityInfo::from_str(src).unwrap();
         let mut cfgrammar_crate_expected = HashMap::new();
         let yacckind_span = src.find_span("yacckind");
-        let yacckind_val_span = src.find_span("YaccKind::Original(YaccOriginalActionKind::UserAction)");
+        let yacckind_val_span =
+            src.find_span("YaccKind::Original(YaccOriginalActionKind::UserAction)");
         cfgrammar_crate_expected.insert(
             "cfgrammar.yacckind".to_string(),
             (
@@ -1185,7 +1186,7 @@ start: "a" { () };
         assert_eq!(cfgrammar_crate_parsed, cfgrammar_crate_expected);
     }
 
-        #[test]
+    #[test]
     fn test_grmtools_section_values4() {
         use super::*;
         let src = r#"

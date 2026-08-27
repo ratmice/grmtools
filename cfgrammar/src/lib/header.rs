@@ -628,10 +628,7 @@ impl<'input> GrmtoolsSectionParser<'input> {
         match RE_NAME.find(&self.src[i..]) {
             Some(m) => {
                 assert_eq!(m.start(), 0);
-                Ok((
-                    self.src[i..i + m.end()].to_string(),
-                    i + m.end(),
-                ))
+                Ok((self.src[i..i + m.end()].to_string(), i + m.end()))
             }
             None => {
                 if self.src[i..].starts_with("*") {
