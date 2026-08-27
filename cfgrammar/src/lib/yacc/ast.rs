@@ -1020,48 +1020,23 @@ start -> () : "a" {$;;;; };
 %%
 start -> () : "a" { () };
 "#;
-        let ast_validity = ASTWithValidityInfo::new(YaccKind::Grmtools, src);
-        let test_flag_span_start = src.find("test.flag").unwrap();
-        let test_flag_span = Span::new(
-            test_flag_span_start,
-            test_flag_span_start + "test.flag".len(),
-        );
-        let test_neg_span_start = src.find("test.negative").unwrap();
-        let test_neg_span = Span::new(
-            test_neg_span_start,
-            test_neg_span_start + "test.negative".len(),
-        );
-        let test_string_span_start = src.find("test.string").unwrap();
-        let test_string_span = Span::new(
-            test_string_span_start,
-            test_string_span_start + "test.string".len(),
-        );
-        let test_string_val_span_start = src.find("Foo").unwrap();
-        let test_string_val_span = Span::new(
-            test_string_val_span_start,
-            test_string_val_span_start + "Foo".len(),
-        );
-        let test_vec_span_start = src.find("test.vec").unwrap();
-        let test_vec_span = Span::new(test_vec_span_start, test_vec_span_start + "test.vec".len());
-        let test_vec_a_span_start = src.find("Aaaa").unwrap();
-        let test_vec_a_span =
-            Span::new(test_vec_a_span_start, test_vec_a_span_start + "Aaaa".len());
-        let test_vec_b_span_start = src.find("Bbbb").unwrap();
-        let test_vec_b_span =
-            Span::new(test_vec_b_span_start, test_vec_b_span_start + "Bbbb".len());
-        let test_vec_val_span_start = src.find("[\"Aaaa\", \"Bbbb\"]").unwrap();
-        let test_vec_val_span = Span::new(
-            test_vec_val_span_start,
-            test_vec_val_span_start + "[\"Aaaa\", \"Bbbb\"]".len(),
-        );
-        let test_num_span_start = src.find("test.num").unwrap();
-        let test_num_span = Span::new(test_num_span_start, test_num_span_start + "test.num".len());
-        let test_num_val_span_start = src.find("1234").unwrap();
-        let test_num_val_span = Span::new(
-            test_num_val_span_start,
-            test_num_val_span_start + "1234".len(),
-        );
+        let ast_validity = ASTWithValidityInfo::from_str(src).unwrap();
 
+        let find_span = |s: &str| {
+            let start_pos = src.find(s).unwrap();
+            Span::new(start_pos, start_pos + s.len())
+        };
+        let test_flag_span = find_span("test.flag");
+        let test_neg_span = find_span("test.negative");
+        let test_neg_val_span = find_span("!test.negative");
+        let test_string_span = find_span("test.string");
+        let test_string_val_span = find_span("Foo");
+        let test_vec_span = find_span("test.vec");
+        let test_vec_a_span = find_span("Aaaa");
+        let test_vec_b_span = find_span("Bbbb");
+        let test_vec_val_span = find_span("[\"Aaaa\", \"Bbbb\"]");
+        let test_num_span = find_span("test.num");
+        let test_num_val_span = find_span("1234");
         let mut test_crate_expected = HashMap::new();
         test_crate_expected.insert(
             "test.flag".to_string(),
@@ -1076,10 +1051,7 @@ start -> () : "a" { () };
                 test_neg_span,
                 GrmtoolsSectionValue::Bool(
                     false,
-                    Span::new(
-                        test_neg_span_start - 1,
-                        test_neg_span_start + "test.negative".len(),
-                    ),
+                    test_neg_val_span,
                 ),
             ),
         );
