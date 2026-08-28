@@ -14,7 +14,12 @@ use std::time::{Duration, Instant};
 use web_time::{Duration, Instant};
 
 use cactus::Cactus;
-use cfgrammar::{RIdx, Span, TIdx, header::Value, span::Location, yacc::YaccGrammar};
+use cfgrammar::{
+    RIdx, Span, TIdx,
+    header::{GrmtoolsSectionValue, HeaderError, HeaderErrorKind},
+    span::Location,
+    yacc::YaccGrammar,
+};
 use lrtable::{Action, StIdx, StateTable};
 use num_traits::{AsPrimitive, PrimInt, Unsigned};
 use proc_macro2::TokenStream;
@@ -635,58 +640,36 @@ pub enum RecoveryKind {
     None,
 }
 
-impl TryFrom<RecoveryKind> for Value<Location> {
+impl TryFrom<RecoveryKind> for GrmtoolsSectionValue<Location> {
     type Error = cfgrammar::header::HeaderError<Location>;
-    fn try_from(rk: RecoveryKind) -> Result<Value<Location>, Self::Error> {
-        use cfgrammar::{
-            Location,
-            header::{Namespaced, Setting},
-        };
+    fn try_from(rk: RecoveryKind) -> Result<GrmtoolsSectionValue<Location>, Self::Error> {
         let from_loc = Location::Other("From<RecoveryKind>".to_string());
         Ok(match rk {
-            RecoveryKind::CPCTPlus => Value::Setting(Setting::Unitary(Namespaced {
-                namespace: Some(("RecoveryKind".to_string(), from_loc.clone())),
-                member: ("CPCTPlus".to_string(), from_loc.clone()),
-            })),
-            RecoveryKind::None => Value::Setting(Setting::Unitary(Namespaced {
-                namespace: Some(("RecoveryKind".to_string(), from_loc.clone())),
-                member: ("None".to_string(), from_loc.clone()),
-            })),
+            RecoveryKind::CPCTPlus => {
+                GrmtoolsSectionValue::RustLike("RecoveryKind::CPCTPlus".to_string(), from_loc)
+            }
+            RecoveryKind::None => {
+                GrmtoolsSectionValue::RustLike("RecoveryKind::None".to_string(), from_loc)
+            }
         })
     }
 }
 
-impl TryFrom<&Value<Location>> for RecoveryKind {
+impl TryFrom<&GrmtoolsSectionValue<Location>> for RecoveryKind {
     type Error = cfgrammar::header::HeaderError<Location>;
-    fn try_from(rk: &Value<Location>) -> Result<RecoveryKind, Self::Error> {
-        use cfgrammar::header::{HeaderError, HeaderErrorKind, Namespaced, Setting};
-
+    fn try_from(rk: &GrmtoolsSectionValue<Location>) -> Result<RecoveryKind, Self::Error> {
         match rk {
-            Value::Setting(Setting::Unitary(Namespaced {
-                namespace,
-                member: (kind, kind_loc),
-            })) => {
-                match namespace {
-                    Some((ns, loc)) if ns.to_lowercase() != "recoverykind" => {
-                        return Err(HeaderError {
-                            kind: HeaderErrorKind::ConversionError(
-                                "RecoveryKind",
-                                "Unknown namespace",
-                            ),
-                            locations: vec![loc.clone()],
-                        });
-                    }
-                    _ => {}
-                }
-                match kind.to_lowercase().as_ref() {
-                    "cpctplus" => Ok(RecoveryKind::CPCTPlus),
-                    "none" => Ok(RecoveryKind::None),
-                    _ => Err(HeaderError {
-                        kind: HeaderErrorKind::ConversionError("RecoveryKind", "Unknown variant"),
-                        locations: vec![kind_loc.clone()],
-                    }),
-                }
-            }
+            GrmtoolsSectionValue::RustLike(rs, loc) => match rs.as_str() {
+                "RecoveryKind::CPCTPlus" | "CPCTPlus" => Ok(RecoveryKind::CPCTPlus),
+                "RecoveryKind::None" | "None" => Ok(RecoveryKind::None),
+                _ => Err(HeaderError {
+                    kind: HeaderErrorKind::ConversionError(
+                        "RecoveryKind",
+                        "Cannot convert to RecoveryKind",
+                    ),
+                    locations: vec![loc.clone()],
+                }),
+            },
             value => Err(HeaderError {
                 kind: HeaderErrorKind::ConversionError(
                     "RecoveryKind",
@@ -1367,7 +1350,7 @@ Call: 'ID' '(' ')';";
 \* '*'
 "#;
         let grammar_src = "
-%grmtools{YaccKind: Original(NoAction)}
+%grmtools{yacckind: Original(NoAction)}
 %start Expr
 %%
 Expr : Expr '+' Term | Term;

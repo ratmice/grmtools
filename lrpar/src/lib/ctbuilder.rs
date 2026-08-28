@@ -27,7 +27,7 @@ use crate::unstable_api::UnstableApi;
 
 use cfgrammar::{
     Location,
-    header::{Header, HeaderError, HeaderErrorKind, HeaderValue, Namespaced, Setting, Value},
+    header::{GrmtoolsSectionValue, Header, HeaderError, HeaderErrorKind, HeaderValue},
     markmap::{Entry, MergeBehavior},
     yacc::{YaccGrammar, YaccKind, ast::ASTWithValidityInfo},
 };
@@ -135,77 +135,47 @@ pub enum SerialisationFormat {
     VariableSizedInteger,
 }
 
-impl TryFrom<SerialisationFormat> for Value<Location> {
+impl TryFrom<SerialisationFormat> for GrmtoolsSectionValue<Location> {
     type Error = cfgrammar::header::HeaderError<Location>;
-    fn try_from(kind: SerialisationFormat) -> Result<Value<Location>, HeaderError<Location>> {
+    fn try_from(
+        kind: SerialisationFormat,
+    ) -> Result<GrmtoolsSectionValue<Location>, HeaderError<Location>> {
         let from_loc = Location::Other("From<SerialisationFormat>".to_string());
         Ok(match kind {
-            SerialisationFormat::FixedSizeInteger => Value::Setting(Setting::Unitary(Namespaced {
-                namespace: Some(("serialisationformat".to_string(), from_loc.clone())),
-                member: ("fixedsizeinteger".to_string(), from_loc),
-            })),
-            SerialisationFormat::VariableSizedInteger => {
-                Value::Setting(Setting::Unitary(Namespaced {
-                    namespace: Some(("serialisationformat".to_string(), from_loc.clone())),
-                    member: ("variablesizedinteger".to_string(), from_loc),
-                }))
-            }
+            SerialisationFormat::FixedSizeInteger => GrmtoolsSectionValue::RustLike(
+                "SerialisationFormat::FixedSizeInteger".to_string(),
+                from_loc,
+            ),
+            SerialisationFormat::VariableSizedInteger => GrmtoolsSectionValue::RustLike(
+                "SerialisationFormat::VariableSizedInteger".to_string(),
+                from_loc,
+            ),
         })
     }
 }
 
-impl<T: Clone + Debug> TryFrom<&Value<T>> for SerialisationFormat {
+impl<T: Clone + Debug> TryFrom<&GrmtoolsSectionValue<T>> for SerialisationFormat {
     type Error = HeaderError<T>;
-    fn try_from(value: &Value<T>) -> Result<SerialisationFormat, HeaderError<T>> {
-        let mut err_locs = Vec::new();
+    fn try_from(value: &GrmtoolsSectionValue<T>) -> Result<SerialisationFormat, HeaderError<T>> {
         match value {
-            // Finally handle enum values.
-            Value::Setting(Setting::Unitary(Namespaced {
-                namespace,
-                member: (enc_value, enc_value_loc),
-            })) => {
-                if let Some((ns, ns_loc)) = namespace
-                    && ns != "serialisationformat"
-                {
-                    err_locs.push(ns_loc.clone());
-                }
-                let encodings = [
-                    (
-                        "fixedsizeinteger".to_string(),
-                        SerialisationFormat::FixedSizeInteger,
-                    ),
-                    (
-                        "variablesizedinteger".to_string(),
-                        SerialisationFormat::VariableSizedInteger,
-                    ),
-                ];
-                let enc_found = encodings
-                    .iter()
-                    .find_map(|(enc_str, enc)| (enc_str == enc_value).then_some(enc));
-                if let Some(enc) = enc_found {
-                    if err_locs.is_empty() {
-                        Ok(*enc)
-                    } else {
-                        Err(HeaderError {
-                            kind: HeaderErrorKind::InvalidEntry("serialisation_format"),
-                            locations: err_locs,
-                        })
+            GrmtoolsSectionValue::RustLike(serialisation_fmt, loc) => {
+                match serialisation_fmt.as_str() {
+                    "SerialisationFormat::FixedSizeInteger" | "FixedSizeInteger" => {
+                        Ok(SerialisationFormat::FixedSizeInteger)
                     }
-                } else {
-                    err_locs.push(enc_value_loc.clone());
-                    Err(HeaderError {
+                    "SerialisationFormat::VariableSizedInteger" | "VariableSizedInteger" => {
+                        Ok(SerialisationFormat::VariableSizedInteger)
+                    }
+                    _ => Err(HeaderError {
                         kind: HeaderErrorKind::InvalidEntry("serialisation_format"),
-                        locations: err_locs,
-                    })
+                        locations: vec![loc.clone()],
+                    }),
                 }
             }
-            val => {
-                err_locs.push(val.primary_location().clone());
-                Err(HeaderError {
-                    kind: HeaderErrorKind::InvalidEntry("serialisation_format"),
-                    locations: err_locs,
-                })
-            }
+            val => Err(HeaderError {
+                kind: HeaderErrorKind::InvalidEntry("serialisation_format"),
+                locations: vec![val.primary_location().clone()],
+            }),
         }
     }
 }
@@ -561,7 +531,7 @@ where
             Entry::Vacant(mut v) => match self.yacckind {
                 Some(YaccKind::Eco) => panic!("Eco compile-time grammar generation not supported."),
                 Some(yk) => {
-                    let yk_value = Value::try_from(yk)?;
+                    let yk_value = GrmtoolsSectionValue::try_from(yk)?;
                     let mut o = v.insert_entry(HeaderValue(
                         Location::Other("CTParserBuilder".to_string()),
                         yk_value,
@@ -577,7 +547,7 @@ where
             match header.entry("lrpar.recoverer".to_string()) {
                 Entry::Occupied(_) => unreachable!(),
                 Entry::Vacant(v) => {
-                    let rk_value: Value<Location> = Value::try_from(recoverer)?;
+                    let rk_value = GrmtoolsSectionValue::try_from(recoverer)?;
                     let mut o = v.insert_entry(HeaderValue(
                         Location::Other("CTParserBuilder".to_string()),
                         rk_value,
@@ -591,7 +561,7 @@ where
             match header.entry("lrpar.serialisation_format".to_string()) {
                 Entry::Occupied(_) => unreachable!(),
                 Entry::Vacant(v) => {
-                    let rk_value: Value<Location> = Value::try_from(encoding)?;
+                    let rk_value = GrmtoolsSectionValue::try_from(encoding)?;
                     let mut o = v.insert_entry(HeaderValue(
                         Location::Other("CTParserBuilder".to_string()),
                         rk_value,
