@@ -253,10 +253,10 @@ impl<'input> GrmtoolsSectionParser<'input> {
                             }
                         }
                     } else {
-                        let ((path_val, path_span), j) = self.parse_namespaced(i)?;
+                        let ((path_val, path_span), j) = self.parse_rustlike(i)?;
                         i = self.parse_ws(j);
                         if let Some(j) = self.lookahead_is("(", i) {
-                            let ((arg, _), j) = self.parse_namespaced(j)?;
+                            let ((arg, _), j) = self.parse_rustlike(j)?;
                             i = self.parse_ws(j);
                             if let Some(j) = self.lookahead_is(")", i) {
                                 i = self.parse_ws(j);
@@ -313,8 +313,8 @@ impl<'input> GrmtoolsSectionParser<'input> {
         }
     }
 
-    fn parse_namespaced(&self, mut i: usize) -> Result<((String, Span), usize), HeaderError<Span>> {
-        // Either a name alone, or a namespace which will be followed by a member.
+    fn parse_rustlike(&self, mut i: usize) -> Result<((String, Span), usize), HeaderError<Span>> {
+        // Either a name alone, or a type::name.
         let (name, j) = self.parse_name(i)?;
         let name_span = Span::new(i, j);
         i = self.parse_ws(j);
