@@ -207,7 +207,7 @@ fn add_duplicate_occurrence<T: Eq + PartialEq + Clone>(
 }
 
 impl<'input> GrmtoolsSectionParser<'input> {
-    fn parse_setting(
+    fn parse_value(
         &'_ self,
         mut i: usize,
     ) -> Result<(GrmtoolsSectionValue<Span>, usize), HeaderError<Span>> {
@@ -244,7 +244,7 @@ impl<'input> GrmtoolsSectionParser<'input> {
                                     end_pos,
                                 ));
                             }
-                            if let Ok((val, k)) = self.parse_setting(j) {
+                            if let Ok((val, k)) = self.parse_value(j) {
                                 vals.push(val);
                                 j = self.parse_ws(k);
                             }
@@ -300,7 +300,7 @@ impl<'input> GrmtoolsSectionParser<'input> {
             let key_span = Span::new(i, j);
             i = self.parse_ws(j);
             if let Some(j) = self.lookahead_is(":", i) {
-                let (val, j) = self.parse_setting(j)?;
+                let (val, j) = self.parse_value(j)?;
                 Ok((key_name, key_span, val, j))
             } else {
                 Ok((
