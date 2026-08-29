@@ -141,16 +141,10 @@ impl TryFrom<SerialisationFormat> for GrmtoolsSectionValue<Location> {
         kind: SerialisationFormat,
     ) -> Result<GrmtoolsSectionValue<Location>, HeaderError<Location>> {
         let from_loc = Location::Other("From<SerialisationFormat>".to_string());
-        Ok(match kind {
-            SerialisationFormat::FixedSizeInteger => GrmtoolsSectionValue::RustLike(
-                "SerialisationFormat::FixedSizeInteger".to_string(),
-                from_loc,
-            ),
-            SerialisationFormat::VariableSizedInteger => GrmtoolsSectionValue::RustLike(
-                "SerialisationFormat::VariableSizedInteger".to_string(),
-                from_loc,
-            ),
-        })
+        Ok(GrmtoolsSectionValue::RustLike(
+            format!("SerialisationFormat::{kind:?}"),
+            from_loc,
+        ))
     }
 }
 

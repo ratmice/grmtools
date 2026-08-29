@@ -644,14 +644,10 @@ impl TryFrom<RecoveryKind> for GrmtoolsSectionValue<Location> {
     type Error = cfgrammar::header::HeaderError<Location>;
     fn try_from(rk: RecoveryKind) -> Result<GrmtoolsSectionValue<Location>, Self::Error> {
         let from_loc = Location::Other("From<RecoveryKind>".to_string());
-        Ok(match rk {
-            RecoveryKind::CPCTPlus => {
-                GrmtoolsSectionValue::RustLike("RecoveryKind::CPCTPlus".to_string(), from_loc)
-            }
-            RecoveryKind::None => {
-                GrmtoolsSectionValue::RustLike("RecoveryKind::None".to_string(), from_loc)
-            }
-        })
+        Ok(GrmtoolsSectionValue::RustLike(
+            format!("RecoveryKind::{rk:?}"),
+            from_loc,
+        ))
     }
 }
 

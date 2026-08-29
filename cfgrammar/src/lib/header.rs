@@ -483,20 +483,7 @@ impl TryFrom<YaccKind> for GrmtoolsSectionValue<Location> {
     fn try_from(kind: YaccKind) -> Result<GrmtoolsSectionValue<Location>, HeaderError<Location>> {
         let from_loc = Location::Other("From<YaccKind>".to_string());
         Ok(GrmtoolsSectionValue::RustLike(
-            match kind {
-                YaccKind::Grmtools => "YaccKind::Grmtools".to_string(),
-                YaccKind::Eco => "YaccKind::Eco".to_string(),
-                YaccKind::Original(action_kind) => {
-                    let action_kind = match action_kind {
-                        YaccOriginalActionKind::NoAction => "YaccOriginalActionKind::NoAction",
-                        YaccOriginalActionKind::UserAction => "YaccOriginalActionKind::UserAction",
-                        YaccOriginalActionKind::GenericParseTree => {
-                            "YaccOriginalActionKind::GenericParseTree"
-                        }
-                    };
-                    format!("YaccKind::Original({action_kind})")
-                }
-            },
+            format!("YaccKind::{kind:?}"),
             from_loc,
         ))
     }
