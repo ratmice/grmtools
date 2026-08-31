@@ -644,7 +644,7 @@ impl TryFrom<RecoveryKind> for Value<Location> {
     type Error = cfgrammar::header::HeaderError<Location>;
     fn try_from(rk: RecoveryKind) -> Result<Value<Location>, Self::Error> {
         let from_loc = Location::Other("From<RecoveryKind>".to_string());
-        Ok(Value::RustLike(format!("RecoveryKind::{rk:?}"), from_loc))
+        Ok(Value::Namespaced(format!("RecoveryKind::{rk:?}"), from_loc))
     }
 }
 
@@ -652,7 +652,7 @@ impl TryFrom<&Value<Location>> for RecoveryKind {
     type Error = cfgrammar::header::HeaderError<Location>;
     fn try_from(rk: &Value<Location>) -> Result<RecoveryKind, Self::Error> {
         match rk {
-            Value::RustLike(rs, loc) => match rs.as_str() {
+            Value::Namespaced(rs, loc) => match rs.as_str() {
                 "RecoveryKind::CPCTPlus" | "CPCTPlus" => Ok(RecoveryKind::CPCTPlus),
                 "RecoveryKind::None" | "None" => Ok(RecoveryKind::None),
                 _ => Err(HeaderError {

@@ -113,7 +113,7 @@ grammar: |
     ;
 
     val -> Value<Span>
-    : namespaced { Value::RustLike($1.0, $1.1) }
+    : namespaced { Value::Namespaced($1.0, $1.1) }
     | NUM  {
         let num_span = $1.as_ref().unwrap().span();
         let n = str::parse::<u64>($lexer.span_str(num_span));
@@ -128,7 +128,7 @@ grammar: |
     }
     | namespaced '(' namespaced ')' {
             let span = Span::new($1.1.start(), $4.as_ref().unwrap().span().end());
-            Value::RustLike(format!("{}({})", $1.0, $3.0), span)
+            Value::Namespaced(format!("{}({})", $1.0, $3.0), span)
         }
     | '[' array_seq ']' {
             let open_span = $1.as_ref().unwrap().span();

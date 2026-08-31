@@ -139,7 +139,7 @@ impl TryFrom<SerialisationFormat> for Value<Location> {
     type Error = cfgrammar::header::HeaderError<Location>;
     fn try_from(kind: SerialisationFormat) -> Result<Value<Location>, HeaderError<Location>> {
         let from_loc = Location::Other("From<SerialisationFormat>".to_string());
-        Ok(Value::RustLike(
+        Ok(Value::Namespaced(
             format!("SerialisationFormat::{kind:?}"),
             from_loc,
         ))
@@ -150,7 +150,7 @@ impl<T: Clone + Debug> TryFrom<&Value<T>> for SerialisationFormat {
     type Error = HeaderError<T>;
     fn try_from(value: &Value<T>) -> Result<SerialisationFormat, HeaderError<T>> {
         match value {
-            Value::RustLike(serialisation_fmt, loc) => match serialisation_fmt.as_str() {
+            Value::Namespaced(serialisation_fmt, loc) => match serialisation_fmt.as_str() {
                 "SerialisationFormat::FixedSizeInteger" | "FixedSizeInteger" => {
                     Ok(SerialisationFormat::FixedSizeInteger)
                 }

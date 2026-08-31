@@ -103,7 +103,7 @@ pub enum Value<T> {
     Num(u64, T),
     Bool(bool, T),
     Array(Vec<Value<T>>, T),
-    RustLike(String, T),
+    Namespaced(String, T),
 }
 
 impl From<Value<Span>> for Value<Location> {
@@ -117,7 +117,7 @@ impl From<Value<Span>> for Value<Location> {
                 v.drain(..).map(|val| val.into()).collect::<Vec<_>>(),
                 Location::Span(span),
             ),
-            GV::RustLike(v, span) => GV::RustLike(v, Location::Span(span)),
+            GV::Namespaced(v, span) => GV::Namespaced(v, Location::Span(span)),
         }
     }
 }
@@ -255,7 +255,7 @@ impl<'input> GrmtoolsSectionParser<'input> {
                             if let Some(j) = self.lookahead_is(")", i) {
                                 i = self.parse_ws(j);
                                 let span = Span::new(path_span.start(), j);
-                                Ok(((Value::RustLike(format!("{path_val}({arg})"), span)), i))
+                                Ok(((Value::Namespaced(format!("{path_val}({arg})"), span)), i))
                             } else {
                                 Err(HeaderError {
                                     kind: HeaderErrorKind::ExpectedToken(')'),
@@ -263,7 +263,7 @@ impl<'input> GrmtoolsSectionParser<'input> {
                                 })
                             }
                         } else {
-                            Ok((Value::RustLike(path_val, path_span), i))
+                            Ok((Value::Namespaced(path_val, path_span), i))
                         }
                     }
                 }
@@ -465,7 +465,7 @@ impl TryFrom<YaccKind> for Value<Location> {
     type Error = HeaderError<Location>;
     fn try_from(kind: YaccKind) -> Result<Value<Location>, HeaderError<Location>> {
         let from_loc = Location::Other("From<YaccKind>".to_string());
-        Ok(Value::RustLike(format!("YaccKind::{kind:?}"), from_loc))
+        Ok(Value::Namespaced(format!("YaccKind::{kind:?}"), from_loc))
     }
 }
 
@@ -473,7 +473,7 @@ impl<T: Clone> TryFrom<&Value<T>> for YaccKind {
     type Error = HeaderError<T>;
     fn try_from(value: &Value<T>) -> Result<YaccKind, HeaderError<T>> {
         match value {
-            Value::RustLike(kind, loc) => match kind.as_str() {
+            Value::Namespaced(kind, loc) => match kind.as_str() {
                 "YaccKind::Grmtools" | "Grmtools" => Ok(YaccKind::Grmtools),
                 "YaccKind::Eco" | "Eco" => Ok(YaccKind::Eco),
                 "YaccKind::Original(UserAction)"
@@ -514,7 +514,7 @@ impl<T> Value<T> {
             Self::Array(_, loc)
             | Self::Bool(_, loc)
             | Self::Num(_, loc)
-            | Self::RustLike(_, loc)
+            | Self::Namespaced(_, loc)
             | Self::String(_, loc) => loc,
         }
     }

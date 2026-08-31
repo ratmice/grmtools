@@ -51,7 +51,7 @@ impl<T: Clone> TryFrom<&Value<T>> for LexerKind {
     type Error = cfgrammar::header::HeaderError<T>;
     fn try_from(it: &Value<T>) -> Result<LexerKind, Self::Error> {
         match it {
-            Value::RustLike(rs, loc) => match rs.as_str() {
+            Value::Namespaced(rs, loc) => match rs.as_str() {
                 "LexerKind::LRNonStreamingLexer" | "LRNonStreamingLexer" => {
                     Ok(LexerKind::LRNonStreamingLexer)
                 }
