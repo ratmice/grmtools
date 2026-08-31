@@ -1,6 +1,6 @@
 use cfgrammar::{
     Location, RIdx, Span, TIdx,
-    header::{GrmtoolsSectionParser, GrmtoolsSectionValue, Header, HeaderError, HeaderValue},
+    header::{GrmtoolsSectionParser, Header, HeaderError, HeaderValue, Value},
     markmap::Entry,
     yacc::{YaccGrammar, YaccKind, YaccOriginalActionKind, ast::ASTWithValidityInfo},
 };
@@ -185,7 +185,7 @@ fn main() {
                 "lrpar.recoverer".to_string(),
                 HeaderValue(
                     Location::CommandLine,
-                    GrmtoolsSectionValue::try_from(match &*s.to_lowercase() {
+                    Value::try_from(match &*s.to_lowercase() {
                         "cpctplus" => RecoveryKind::CPCTPlus,
                         "none" => RecoveryKind::None,
                         _ => usage(prog, &format!("Unknown recoverer '{}'.", s)),
@@ -204,7 +204,7 @@ fn main() {
         Some(s) => {
             entry.insert_entry(HeaderValue(
                 Location::CommandLine,
-                GrmtoolsSectionValue::try_from(match &*s.to_lowercase() {
+                Value::try_from(match &*s.to_lowercase() {
                     "eco" => YaccKind::Eco,
                     "grmtools" => YaccKind::Grmtools,
                     "original" => YaccKind::Original(YaccOriginalActionKind::GenericParseTree),
@@ -552,10 +552,10 @@ where
         } else {
             // If given no input paths, try to find some with `test_files` in the header.
             match self.header.get("lrpar.test_files") {
-                Some(HeaderValue(_, GrmtoolsSectionValue::Array(test_globs, _))) => {
+                Some(HeaderValue(_, Value::Array(test_globs, _))) => {
                     for setting in test_globs {
                         match setting {
-                            GrmtoolsSectionValue::String(s, _) => {
+                            Value::String(s, _) => {
                                 if let Some(yacc_y_path_dir) = self.yacc_y_path.parent() {
                                     let joined = yacc_y_path_dir.join(s);
                                     let joined = joined.as_os_str().to_str();

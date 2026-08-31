@@ -1,7 +1,7 @@
 //! Build grammars at run-time.
 
 use cfgrammar::{
-    header::{GrmtoolsSectionValue, Header, HeaderError, HeaderErrorKind, HeaderValue},
+    header::{Header, HeaderError, HeaderErrorKind, HeaderValue, Value},
     markmap::MergeBehavior,
     span::{Location, Span},
 };
@@ -47,11 +47,11 @@ pub enum LexerKind {
     LRNonStreamingLexer,
 }
 
-impl<T: Clone> TryFrom<&GrmtoolsSectionValue<T>> for LexerKind {
+impl<T: Clone> TryFrom<&Value<T>> for LexerKind {
     type Error = cfgrammar::header::HeaderError<T>;
-    fn try_from(it: &GrmtoolsSectionValue<T>) -> Result<LexerKind, Self::Error> {
+    fn try_from(it: &Value<T>) -> Result<LexerKind, Self::Error> {
         match it {
-            GrmtoolsSectionValue::RustLike(rs, loc) => match rs.as_str() {
+            Value::RustLike(rs, loc) => match rs.as_str() {
                 "LexerKind::LRNonStreamingLexer" | "LRNonStreamingLexer" => {
                     Ok(LexerKind::LRNonStreamingLexer)
                 }
@@ -460,10 +460,10 @@ where
                         }
                     };
                     match test_glob {
-                        Some(HeaderValue(_, GrmtoolsSectionValue::Array(test_globs, _))) => {
+                        Some(HeaderValue(_, Value::Array(test_globs, _))) => {
                             for setting in test_globs {
                                 match setting {
-                                    GrmtoolsSectionValue::String(test_files, _) => {
+                                    Value::String(test_files, _) => {
                                         let path_joined = grm_path.parent().unwrap().join(test_files);
                                         let path_str = &path_joined.to_string_lossy();
                                         let mut glob_paths = glob(path_str).map_err(|e| e.to_string())?.peekable();
@@ -790,7 +790,7 @@ where
             key,
             HeaderValue(
                 Location::Other("CTLexerBuilder".to_string()),
-                GrmtoolsSectionValue::Bool(flag, Location::Other("CTLexerBuilder".to_string())),
+                Value::Bool(flag, Location::Other("CTLexerBuilder".to_string())),
             ),
         );
         self
@@ -806,7 +806,7 @@ where
             key,
             HeaderValue(
                 Location::Other("CTLexerBuilder".to_string()),
-                GrmtoolsSectionValue::Bool(flag, Location::Other("CTLexerBuilder".to_string())),
+                Value::Bool(flag, Location::Other("CTLexerBuilder".to_string())),
             ),
         );
         self
@@ -822,7 +822,7 @@ where
             key,
             HeaderValue(
                 Location::Other("CTLexerBuilder".to_string()),
-                GrmtoolsSectionValue::Bool(flag, Location::Other("CTLexerBuilder".to_string())),
+                Value::Bool(flag, Location::Other("CTLexerBuilder".to_string())),
             ),
         );
         self
@@ -838,7 +838,7 @@ where
             key,
             HeaderValue(
                 Location::Other("CTLexerBuilder".to_string()),
-                GrmtoolsSectionValue::Bool(flag, Location::Other("CTLexerBuilder".to_string())),
+                Value::Bool(flag, Location::Other("CTLexerBuilder".to_string())),
             ),
         );
         self
@@ -854,7 +854,7 @@ where
             key,
             HeaderValue(
                 Location::Other("CTLexerBuilder".to_string()),
-                GrmtoolsSectionValue::Bool(flag, Location::Other("CTLexerBuilder".to_string())),
+                Value::Bool(flag, Location::Other("CTLexerBuilder".to_string())),
             ),
         );
         self
@@ -870,7 +870,7 @@ where
             key,
             HeaderValue(
                 Location::Other("CTLexerBuilder".to_string()),
-                GrmtoolsSectionValue::Bool(flag, Location::Other("CTLexerBuilder".to_string())),
+                Value::Bool(flag, Location::Other("CTLexerBuilder".to_string())),
             ),
         );
         self
@@ -886,7 +886,7 @@ where
             key,
             HeaderValue(
                 Location::Other("CTLexerBuilder".to_string()),
-                GrmtoolsSectionValue::Bool(flag, Location::Other("CTLexerBuilder".to_string())),
+                Value::Bool(flag, Location::Other("CTLexerBuilder".to_string())),
             ),
         );
         self
@@ -902,7 +902,7 @@ where
             key,
             HeaderValue(
                 Location::Other("CTLexerBuilder".to_string()),
-                GrmtoolsSectionValue::Bool(flag, Location::Other("CTLexerBuilder".to_string())),
+                Value::Bool(flag, Location::Other("CTLexerBuilder".to_string())),
             ),
         );
         self
@@ -918,7 +918,7 @@ where
             key,
             HeaderValue(
                 Location::Other("CTLexerBuilder".to_string()),
-                GrmtoolsSectionValue::Bool(flag, Location::Other("CTLexerBuilder".to_string())),
+                Value::Bool(flag, Location::Other("CTLexerBuilder".to_string())),
             ),
         );
         self
@@ -934,7 +934,7 @@ where
             key,
             HeaderValue(
                 Location::Other("CTLexerBuilder".to_string()),
-                GrmtoolsSectionValue::Num(sz as u64, Location::Other("CTLexerBuilder".to_string())),
+                Value::Num(sz as u64, Location::Other("CTLexerBuilder".to_string())),
             ),
         );
         self
@@ -950,7 +950,7 @@ where
             key,
             HeaderValue(
                 Location::Other("CTLexerBuilder".to_string()),
-                GrmtoolsSectionValue::Num(sz as u64, Location::Other("CTLexerBuilder".to_string())),
+                Value::Num(sz as u64, Location::Other("CTLexerBuilder".to_string())),
             ),
         );
         self
@@ -966,10 +966,7 @@ where
             key,
             HeaderValue(
                 Location::Other("CTLexerBuilder".to_string()),
-                GrmtoolsSectionValue::Num(
-                    lim as u64,
-                    Location::Other("CTLexerBuilder".to_string()),
-                ),
+                Value::Num(lim as u64, Location::Other("CTLexerBuilder".to_string())),
             ),
         );
         self

@@ -9,10 +9,7 @@ use std::{
 
 use cfgrammar::{
     NewlineCache, Span,
-    header::{
-        GrmtoolsSectionParser, GrmtoolsSectionValue, Header, HeaderError, HeaderErrorKind,
-        HeaderValue,
-    },
+    header::{GrmtoolsSectionParser, Header, HeaderError, HeaderErrorKind, HeaderValue, Value},
     span::Location,
 };
 use num_traits::{AsPrimitive, PrimInt, Unsigned};
@@ -69,7 +66,7 @@ impl<T: Clone> TryFrom<&mut Header<T>> for LexFlags {
             ($prefix:ident, $it:ident) => {
                 header.mark_used(&stringify!($prefix.$it).to_string());
                 *$it = match header.get(stringify!($prefix.$it)) {
-                    Some(HeaderValue(_, GrmtoolsSectionValue::Bool(flag, _))) => Some(*flag),
+                    Some(HeaderValue(_, Value::Bool(flag, _))) => Some(*flag),
                     Some(HeaderValue(_, val)) => Err(HeaderError {
                         kind: HeaderErrorKind::ConversionError("LexFlags", "Expected boolean"),
                         locations: vec![val.primary_location().clone()],
@@ -91,7 +88,7 @@ impl<T: Clone> TryFrom<&mut Header<T>> for LexFlags {
             ($prefix:ident, $it:ident, $num_ty: ty) => {
                 header.mark_used(&stringify!($prefix.$it).to_string());
                 *$it = match header.get(stringify!($prefix.$it)) {
-                    Some(HeaderValue(_, GrmtoolsSectionValue::Num(n, _))) => Some(*n as $num_ty),
+                    Some(HeaderValue(_, Value::Num(n, _))) => Some(*n as $num_ty),
                     Some(HeaderValue(_, val)) => Err(HeaderError {
                         kind: HeaderErrorKind::ConversionError("LexFlags", "Expected numeric"),
                         locations: vec![val.primary_location().clone()],
@@ -131,10 +128,7 @@ impl From<&LexFlags> for Header<Location> {
                         stringify!($it).to_string(),
                         HeaderValue(
                             Location::Other("From<&LexFlags>".to_string()),
-                            GrmtoolsSectionValue::Bool(
-                                x,
-                                Location::Other("From<&LexFlags>".to_string()),
-                            ),
+                            Value::Bool(x, Location::Other("From<&LexFlags>".to_string())),
                         ),
                     )
                 });
@@ -157,10 +151,7 @@ impl From<&LexFlags> for Header<Location> {
                         stringify!($it).to_string(),
                         HeaderValue(
                             Location::Other("From<&LexFlags>".to_string()),
-                            GrmtoolsSectionValue::Num(
-                                x as u64,
-                                Location::Other("From<&LexFlags>".to_string()),
-                            ),
+                            Value::Num(x as u64, Location::Other("From<&LexFlags>".to_string())),
                         ),
                     )
                 });

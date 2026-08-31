@@ -50,7 +50,7 @@ impl Spanned for HeaderError<Span> {
 // Thus we aren't worried about it being `pub`.
 #[derive(Debug, PartialEq)]
 #[doc(hidden)]
-pub struct HeaderValue<T>(pub T, pub GrmtoolsSectionValue<T>);
+pub struct HeaderValue<T>(pub T, pub Value<T>);
 
 impl From<HeaderValue<Span>> for HeaderValue<Location> {
     fn from(hv: HeaderValue<Span>) -> HeaderValue<Location> {
@@ -98,17 +98,17 @@ pub struct GrmtoolsSectionParser<'input> {
 }
 
 #[derive(Debug, Clone, Eq, PartialEq, Hash)]
-pub enum GrmtoolsSectionValue<T> {
+pub enum Value<T> {
     String(String, T),
     Num(u64, T),
     Bool(bool, T),
-    Array(Vec<GrmtoolsSectionValue<T>>, T),
+    Array(Vec<Value<T>>, T),
     RustLike(String, T),
 }
 
-impl From<GrmtoolsSectionValue<Span>> for GrmtoolsSectionValue<Location> {
-    fn from(it: GrmtoolsSectionValue<Span>) -> GrmtoolsSectionValue<Location> {
-        use GrmtoolsSectionValue as GV;
+impl From<Value<Span>> for Value<Location> {
+    fn from(it: Value<Span>) -> Value<Location> {
+        use Value as GV;
         match it {
             GV::String(v, span) => GV::String(v, Location::Span(span)),
             GV::Num(v, span) => GV::Num(v, Location::Span(span)),
@@ -207,10 +207,7 @@ fn add_duplicate_occurrence<T: Eq + PartialEq + Clone>(
 }
 
 impl<'input> GrmtoolsSectionParser<'input> {
-    fn parse_value(
-        &'_ self,
-        mut i: usize,
-    ) -> Result<(GrmtoolsSectionValue<Span>, usize), HeaderError<Span>> {
+    fn parse_value(&'_ self, mut i: usize) -> Result<(Value<Span>, usize), HeaderError<Span>> {
         i = self.parse_ws(i);
         match RE_DIGITS.find(&self.src[i..]) {
             Some(m) => {
@@ -218,7 +215,7 @@ impl<'input> GrmtoolsSectionParser<'input> {
                 let num_str = &self.src[num_span.start()..num_span.end()];
                 // If the above regex matches we expect this to succeed.
                 let num = str::parse::<u64>(num_str).unwrap();
-                let val = GrmtoolsSectionValue::Num(num, num_span);
+                let val = Value::Num(num, num_span);
                 i = self.parse_ws(num_span.end());
                 Ok((val, i))
             }
@@ -228,7 +225,7 @@ impl<'input> GrmtoolsSectionParser<'input> {
                     // Trim the leading and trailing quotes.
                     let str_span = Span::new(i + m.start() + 1, end - 1);
                     let str = &self.src[str_span.start()..str_span.end()];
-                    let setting = GrmtoolsSectionValue::String(str.to_string(), str_span);
+                    let setting = Value::String(str.to_string(), str_span);
                     // After the trailing quotes.
                     i = self.parse_ws(end);
                     Ok((setting, i))
@@ -239,10 +236,7 @@ impl<'input> GrmtoolsSectionParser<'input> {
                         loop {
                             j = self.parse_ws(j);
                             if let Some(end_pos) = self.lookahead_is("]", j) {
-                                return Ok((
-                                    GrmtoolsSectionValue::Array(vals, Span::new(i, end_pos)),
-                                    end_pos,
-                                ));
+                                return Ok((Value::Array(vals, Span::new(i, end_pos)), end_pos));
                             }
                             if let Ok((val, k)) = self.parse_value(j) {
                                 vals.push(val);
@@ -261,13 +255,7 @@ impl<'input> GrmtoolsSectionParser<'input> {
                             if let Some(j) = self.lookahead_is(")", i) {
                                 i = self.parse_ws(j);
                                 let span = Span::new(path_span.start(), j);
-                                Ok((
-                                    (GrmtoolsSectionValue::RustLike(
-                                        format!("{path_val}({arg})"),
-                                        span,
-                                    )),
-                                    i,
-                                ))
+                                Ok(((Value::RustLike(format!("{path_val}({arg})"), span)), i))
                             } else {
                                 Err(HeaderError {
                                     kind: HeaderErrorKind::ExpectedToken(')'),
@@ -275,7 +263,7 @@ impl<'input> GrmtoolsSectionParser<'input> {
                                 })
                             }
                         } else {
-                            Ok((GrmtoolsSectionValue::RustLike(path_val, path_span), i))
+                            Ok((Value::RustLike(path_val, path_span), i))
                         }
                     }
                 }
@@ -286,13 +274,13 @@ impl<'input> GrmtoolsSectionParser<'input> {
     pub fn parse_key_value(
         &'_ self,
         mut i: usize,
-    ) -> Result<(String, Span, GrmtoolsSectionValue<Span>, usize), HeaderError<Span>> {
+    ) -> Result<(String, Span, Value<Span>, usize), HeaderError<Span>> {
         if let Some(j) = self.lookahead_is("!", i) {
             let (flag_name, k) = self.parse_name(j)?;
             Ok((
                 flag_name,
                 Span::new(j, k),
-                GrmtoolsSectionValue::Bool(false, Span::new(i, k)),
+                Value::Bool(false, Span::new(i, k)),
                 self.parse_ws(k),
             ))
         } else {
@@ -303,12 +291,7 @@ impl<'input> GrmtoolsSectionParser<'input> {
                 let (val, j) = self.parse_value(j)?;
                 Ok((key_name, key_span, val, j))
             } else {
-                Ok((
-                    key_name,
-                    key_span,
-                    GrmtoolsSectionValue::Bool(true, key_span),
-                    i,
-                ))
+                Ok((key_name, key_span, Value::Bool(true, key_span), i))
             }
         }
     }
@@ -478,22 +461,19 @@ impl<'input> GrmtoolsSectionParser<'input> {
 #[doc(hidden)]
 pub type Header<T> = MarkMap<String, HeaderValue<T>>;
 
-impl TryFrom<YaccKind> for GrmtoolsSectionValue<Location> {
+impl TryFrom<YaccKind> for Value<Location> {
     type Error = HeaderError<Location>;
-    fn try_from(kind: YaccKind) -> Result<GrmtoolsSectionValue<Location>, HeaderError<Location>> {
+    fn try_from(kind: YaccKind) -> Result<Value<Location>, HeaderError<Location>> {
         let from_loc = Location::Other("From<YaccKind>".to_string());
-        Ok(GrmtoolsSectionValue::RustLike(
-            format!("YaccKind::{kind:?}"),
-            from_loc,
-        ))
+        Ok(Value::RustLike(format!("YaccKind::{kind:?}"), from_loc))
     }
 }
 
-impl<T: Clone> TryFrom<&GrmtoolsSectionValue<T>> for YaccKind {
+impl<T: Clone> TryFrom<&Value<T>> for YaccKind {
     type Error = HeaderError<T>;
-    fn try_from(value: &GrmtoolsSectionValue<T>) -> Result<YaccKind, HeaderError<T>> {
+    fn try_from(value: &Value<T>) -> Result<YaccKind, HeaderError<T>> {
         match value {
-            GrmtoolsSectionValue::RustLike(kind, loc) => match kind.as_str() {
+            Value::RustLike(kind, loc) => match kind.as_str() {
                 "YaccKind::Grmtools" | "Grmtools" => Ok(YaccKind::Grmtools),
                 "YaccKind::Eco" | "Eco" => Ok(YaccKind::Eco),
                 "YaccKind::Original(UserAction)"
@@ -527,7 +507,7 @@ impl<T: Clone> TryFrom<&GrmtoolsSectionValue<T>> for YaccKind {
     }
 }
 
-impl<T> GrmtoolsSectionValue<T> {
+impl<T> Value<T> {
     #[doc(hidden)]
     pub fn primary_location(&self) -> &T {
         match self {

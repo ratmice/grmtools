@@ -27,7 +27,7 @@ use crate::unstable_api::UnstableApi;
 
 use cfgrammar::{
     Location,
-    header::{GrmtoolsSectionValue, Header, HeaderError, HeaderErrorKind, HeaderValue},
+    header::{Header, HeaderError, HeaderErrorKind, HeaderValue, Value},
     markmap::{Entry, MergeBehavior},
     yacc::{YaccGrammar, YaccKind, ast::ASTWithValidityInfo},
 };
@@ -135,37 +135,33 @@ pub enum SerialisationFormat {
     VariableSizedInteger,
 }
 
-impl TryFrom<SerialisationFormat> for GrmtoolsSectionValue<Location> {
+impl TryFrom<SerialisationFormat> for Value<Location> {
     type Error = cfgrammar::header::HeaderError<Location>;
-    fn try_from(
-        kind: SerialisationFormat,
-    ) -> Result<GrmtoolsSectionValue<Location>, HeaderError<Location>> {
+    fn try_from(kind: SerialisationFormat) -> Result<Value<Location>, HeaderError<Location>> {
         let from_loc = Location::Other("From<SerialisationFormat>".to_string());
-        Ok(GrmtoolsSectionValue::RustLike(
+        Ok(Value::RustLike(
             format!("SerialisationFormat::{kind:?}"),
             from_loc,
         ))
     }
 }
 
-impl<T: Clone + Debug> TryFrom<&GrmtoolsSectionValue<T>> for SerialisationFormat {
+impl<T: Clone + Debug> TryFrom<&Value<T>> for SerialisationFormat {
     type Error = HeaderError<T>;
-    fn try_from(value: &GrmtoolsSectionValue<T>) -> Result<SerialisationFormat, HeaderError<T>> {
+    fn try_from(value: &Value<T>) -> Result<SerialisationFormat, HeaderError<T>> {
         match value {
-            GrmtoolsSectionValue::RustLike(serialisation_fmt, loc) => {
-                match serialisation_fmt.as_str() {
-                    "SerialisationFormat::FixedSizeInteger" | "FixedSizeInteger" => {
-                        Ok(SerialisationFormat::FixedSizeInteger)
-                    }
-                    "SerialisationFormat::VariableSizedInteger" | "VariableSizedInteger" => {
-                        Ok(SerialisationFormat::VariableSizedInteger)
-                    }
-                    _ => Err(HeaderError {
-                        kind: HeaderErrorKind::InvalidEntry("serialisation_format"),
-                        locations: vec![loc.clone()],
-                    }),
+            Value::RustLike(serialisation_fmt, loc) => match serialisation_fmt.as_str() {
+                "SerialisationFormat::FixedSizeInteger" | "FixedSizeInteger" => {
+                    Ok(SerialisationFormat::FixedSizeInteger)
                 }
-            }
+                "SerialisationFormat::VariableSizedInteger" | "VariableSizedInteger" => {
+                    Ok(SerialisationFormat::VariableSizedInteger)
+                }
+                _ => Err(HeaderError {
+                    kind: HeaderErrorKind::InvalidEntry("serialisation_format"),
+                    locations: vec![loc.clone()],
+                }),
+            },
             val => Err(HeaderError {
                 kind: HeaderErrorKind::InvalidEntry("serialisation_format"),
                 locations: vec![val.primary_location().clone()],
@@ -525,7 +521,7 @@ where
             Entry::Vacant(mut v) => match self.yacckind {
                 Some(YaccKind::Eco) => panic!("Eco compile-time grammar generation not supported."),
                 Some(yk) => {
-                    let yk_value = GrmtoolsSectionValue::try_from(yk)?;
+                    let yk_value = Value::try_from(yk)?;
                     let mut o = v.insert_entry(HeaderValue(
                         Location::Other("CTParserBuilder".to_string()),
                         yk_value,
@@ -541,7 +537,7 @@ where
             match header.entry("lrpar.recoverer".to_string()) {
                 Entry::Occupied(_) => unreachable!(),
                 Entry::Vacant(v) => {
-                    let rk_value = GrmtoolsSectionValue::try_from(recoverer)?;
+                    let rk_value = Value::try_from(recoverer)?;
                     let mut o = v.insert_entry(HeaderValue(
                         Location::Other("CTParserBuilder".to_string()),
                         rk_value,
@@ -555,7 +551,7 @@ where
             match header.entry("lrpar.serialisation_format".to_string()) {
                 Entry::Occupied(_) => unreachable!(),
                 Entry::Vacant(v) => {
-                    let rk_value = GrmtoolsSectionValue::try_from(encoding)?;
+                    let rk_value = Value::try_from(encoding)?;
                     let mut o = v.insert_entry(HeaderValue(
                         Location::Other("CTParserBuilder".to_string()),
                         rk_value,

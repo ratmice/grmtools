@@ -93,7 +93,7 @@ grammar: |
     }
     ;
 
-    valbind -> ((String, Span), GrmtoolsSectionValue<Span>)
+    valbind -> ((String, Span), Value<Span>)
     : IDENT ':' val {
         let key_span = $1.as_ref().unwrap().span();
         let key = $lexer.span_str(key_span).to_string();
@@ -102,43 +102,43 @@ grammar: |
     | IDENT {
         let key_span = $1.as_ref().unwrap().span();
         let key = $lexer.span_str(key_span).to_string();
-        ((key, key_span), GrmtoolsSectionValue::Bool(true, key_span))
+        ((key, key_span), Value::Bool(true, key_span))
     }
     | '!' IDENT {
         let bang_span = $1.as_ref().unwrap().span();
         let key_span = $2.as_ref().unwrap().span();
         let key = $lexer.span_str(key_span).to_string();
-        ((key, key_span), GrmtoolsSectionValue::Bool(false, Span::new(bang_span.start(), key_span.end())))
+        ((key, key_span), Value::Bool(false, Span::new(bang_span.start(), key_span.end())))
     }
     ;
 
-    val -> GrmtoolsSectionValue<Span>
-    : namespaced { GrmtoolsSectionValue::RustLike($1.0, $1.1) }
+    val -> Value<Span>
+    : namespaced { Value::RustLike($1.0, $1.1) }
     | NUM  {
         let num_span = $1.as_ref().unwrap().span();
         let n = str::parse::<u64>($lexer.span_str(num_span));
-        GrmtoolsSectionValue::Num(n.expect("convertible"), num_span)
+        Value::Num(n.expect("convertible"), num_span)
     }
     | STRING {
         let string_span = $1.as_ref().unwrap().span();
         // Trim the leading and trailing " characters.
         let string_span = Span::new(string_span.start() + 1, string_span.end() - 1);
         let s = $lexer.span_str(string_span).to_string();
-        GrmtoolsSectionValue::String(s, string_span)
+        Value::String(s, string_span)
     }
     | namespaced '(' namespaced ')' {
             let span = Span::new($1.1.start(), $4.as_ref().unwrap().span().end());
-            GrmtoolsSectionValue::RustLike(format!("{}({})", $1.0, $3.0), span)
+            Value::RustLike(format!("{}({})", $1.0, $3.0), span)
         }
     | '[' array_seq ']' {
             let open_span = $1.as_ref().unwrap().span();
             let close_span = $3.as_ref().unwrap().span();
             let span = Span::new(open_span.start(), close_span.end());
-            GrmtoolsSectionValue::Array($2, span)
+            Value::Array($2, span)
         }
     ;
 
-    array_seq -> Vec<GrmtoolsSectionValue<Span>>
+    array_seq -> Vec<Value<Span>>
     : %empty { Vec::new() }
     | val {
         vec![$1]
@@ -163,7 +163,7 @@ grammar: |
             HeaderError,
             HeaderErrorKind,
             HeaderValue,
-            GrmtoolsSectionValue,
+            Value,
             CRATE_KEY_MAP,
             RE_CRATE_DOT,
         },

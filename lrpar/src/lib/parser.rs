@@ -16,7 +16,7 @@ use web_time::{Duration, Instant};
 use cactus::Cactus;
 use cfgrammar::{
     RIdx, Span, TIdx,
-    header::{GrmtoolsSectionValue, HeaderError, HeaderErrorKind},
+    header::{HeaderError, HeaderErrorKind, Value},
     span::Location,
     yacc::YaccGrammar,
 };
@@ -640,22 +640,19 @@ pub enum RecoveryKind {
     None,
 }
 
-impl TryFrom<RecoveryKind> for GrmtoolsSectionValue<Location> {
+impl TryFrom<RecoveryKind> for Value<Location> {
     type Error = cfgrammar::header::HeaderError<Location>;
-    fn try_from(rk: RecoveryKind) -> Result<GrmtoolsSectionValue<Location>, Self::Error> {
+    fn try_from(rk: RecoveryKind) -> Result<Value<Location>, Self::Error> {
         let from_loc = Location::Other("From<RecoveryKind>".to_string());
-        Ok(GrmtoolsSectionValue::RustLike(
-            format!("RecoveryKind::{rk:?}"),
-            from_loc,
-        ))
+        Ok(Value::RustLike(format!("RecoveryKind::{rk:?}"), from_loc))
     }
 }
 
-impl TryFrom<&GrmtoolsSectionValue<Location>> for RecoveryKind {
+impl TryFrom<&Value<Location>> for RecoveryKind {
     type Error = cfgrammar::header::HeaderError<Location>;
-    fn try_from(rk: &GrmtoolsSectionValue<Location>) -> Result<RecoveryKind, Self::Error> {
+    fn try_from(rk: &Value<Location>) -> Result<RecoveryKind, Self::Error> {
         match rk {
-            GrmtoolsSectionValue::RustLike(rs, loc) => match rs.as_str() {
+            Value::RustLike(rs, loc) => match rs.as_str() {
                 "RecoveryKind::CPCTPlus" | "CPCTPlus" => Ok(RecoveryKind::CPCTPlus),
                 "RecoveryKind::None" | "None" => Ok(RecoveryKind::None),
                 _ => Err(HeaderError {
