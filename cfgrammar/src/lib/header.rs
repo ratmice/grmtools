@@ -97,12 +97,27 @@ pub struct GrmtoolsSectionParser<'input> {
     required: bool,
 }
 
+/// The value contained within a `Header`
+///
+/// To be useful across diverse crates this types fields are largely limited to types derived from `core::` types.
+/// like booleans, numeric types, and string values. The exception to this is `Namespaced` which still must
+///  be able to be marshalled through a string value.
+///
+/// The generic parameter `T` indicates the source of the value, for values read from a `%grmtools` section
+/// this should be a `Span`. For other values which stem from command line arguments, or a programmatic interface
+/// this should be a `Location`.
 #[derive(Debug, Clone, Eq, PartialEq, Hash)]
 pub enum Value<T> {
     String(String, T),
     Num(u64, T),
     Bool(bool, T),
     Array(Vec<Value<T>>, T),
+    /// A Rust like value, with an optional type namespace.
+    ///
+    /// Examples of `Namespaced` values:
+    /// * YaccKind::Grmtools or Grmtools
+    /// * YaccKind::Original(UserAction) or YaccKind::Original(YaccOriginalActionKind::UserAction)
+    /// * Original(UserAction) or Original(YaccOriginalActionKind::UserAction)
     Namespaced(String, T),
 }
 
