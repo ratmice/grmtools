@@ -463,12 +463,14 @@ where
         let mut unrecognized_keys = Vec::new();
         unrecognized_keys.extend(
             self.ast_with_validity_info()
-                .unrecognized_keys_for_prefix("cfgrammar", &CFGRAMMAR_KEYS)
+                .iter_prefix_keys("cfgrammar")
+                .filter(|(key, _)| !CFGRAMMAR_KEYS.contains(key))
                 .map(|(s, span)| (s.to_string(), span)),
         );
         unrecognized_keys.extend(
             self.ast_with_validity_info()
-                .unrecognized_keys_for_prefix("lrpar", &LRPAR_KEYS)
+                .iter_prefix_keys("lrpar")
+                .filter(|(key, _)| !LRPAR_KEYS.contains(key))
                 .map(|(s, span)| (s.to_string(), span)),
         );
         if !unrecognized_keys.is_empty() {

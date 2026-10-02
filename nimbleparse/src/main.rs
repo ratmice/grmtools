@@ -246,8 +246,17 @@ fn main() {
     let yacc_kind = yk_arg.unwrap_or(yk_header_val.unwrap_or(YaccKind::Grmtools));
     let ast_validation = ASTWithValidityInfo::new(yacc_kind, &yacc_src);
     let mut unused_keys = Vec::new();
-    unused_keys.extend(ast_validation.unrecognized_keys_for_prefix("cfgrammar", &CFGRAMMAR_KEYS));
-    unused_keys.extend(ast_validation.unrecognized_keys_for_prefix("lrpar", &LRPAR_KEYS));
+    // FIXME stop using hidden API
+    unused_keys.extend(
+        ast_validation
+            .iter_prefix_keys("cfgrammar")
+            .filter(|(key, _)| !CFGRAMMAR_KEYS.contains(key)),
+    );
+    unused_keys.extend(
+        ast_validation
+            .iter_prefix_keys("lrpar")
+            .filter(|(key, _)| !LRPAR_KEYS.contains(key)),
+    );
 
     if !unused_keys.is_empty() {
         eprintln!(

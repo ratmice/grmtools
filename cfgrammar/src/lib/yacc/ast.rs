@@ -135,15 +135,6 @@ impl ASTWithValidityInfo {
             })
     }
 
-    pub fn unrecognized_keys_for_prefix(
-        &self,
-        prefix: &str,
-        valid_keys: &HashSet<&str>,
-    ) -> impl Iterator<Item = (&str, Span)> {
-        self.iter_prefix_keys(prefix)
-            .filter(|(key, _)| !valid_keys.contains(*key))
-    }
-
     #[doc(hidden)]
     pub fn header(&self) -> &Header<Span> {
         &self.grmtools_section
@@ -1034,7 +1025,7 @@ start -> () : "a" {$;;;; };
     fn test_grmtools_section_values() {
         use super::*;
         use crate::header::Value;
-        let valid_test_keys = HashSet::from_iter([
+        let valid_test_keys: HashSet<&str> = HashSet::from_iter([
             "test.string",
             "test.vec",
             "test.num",
@@ -1106,7 +1097,8 @@ start -> () : "a" { () };
         eprintln!("umm {src}");
         assert_eq!(
             ast_validity
-                .unrecognized_keys_for_prefix("test", &valid_test_keys)
+                .iter_prefix_keys("test")
+                .filter(|(key, _)| !valid_test_keys.contains(*key))
                 .collect::<Vec<_>>(),
             vec![("test.unused", src.find_span("test.unused"))]
         );
@@ -1119,8 +1111,8 @@ start -> () : "a" { () };
         );
         assert!(
             ast_validity
-                .unrecognized_keys_for_prefix("cfgrammar", &CFGRAMMAR_KEYS)
-                .next()
+                .iter_prefix_keys("cfgrammar")
+                .find(|(key, _)| !CFGRAMMAR_KEYS.contains(key))
                 .is_none()
         );
 
@@ -1134,8 +1126,8 @@ start -> () : "a" { () };
 
         assert!(
             ast_validity
-                .unrecognized_keys_for_prefix("lrpar", &LRPAR_KEYS)
-                .next()
+                .iter_prefix_keys("lrpar")
+                .find(|(key, _)| !LRPAR_KEYS.contains(key))
                 .is_none()
         );
     }
@@ -1165,8 +1157,8 @@ start: "a" { () };
         );
         assert!(
             ast_validity
-                .unrecognized_keys_for_prefix("cfgrammar", &CFGRAMMAR_KEYS)
-                .next()
+                .iter_prefix_keys("cfgrammar")
+                .find(|(key, _)| !CFGRAMMAR_KEYS.contains(key))
                 .is_none()
         );
     }
@@ -1196,8 +1188,8 @@ start: "a" { () };
         );
         assert!(
             ast_validity
-                .unrecognized_keys_for_prefix("cfgrammar", &CFGRAMMAR_KEYS)
-                .next()
+                .iter_prefix_keys("cfgrammar")
+                .find(|(key, _)| !CFGRAMMAR_KEYS.contains(key))
                 .is_none()
         );
     }
@@ -1227,8 +1219,8 @@ start: "a" { () };
         );
         assert!(
             ast_validity
-                .unrecognized_keys_for_prefix("cfgrammar", &CFGRAMMAR_KEYS)
-                .next()
+                .iter_prefix_keys("cfgrammar")
+                .find(|(key, _)| !CFGRAMMAR_KEYS.contains(key))
                 .is_none()
         );
     }
