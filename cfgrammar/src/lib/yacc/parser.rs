@@ -16,7 +16,7 @@ use wincode::{SchemaRead, SchemaWrite};
 
 use crate::{
     Span, Spanned,
-    header::{CRATE_KEY_MAP, GrmtoolsSectionParser, Header, HeaderErrorKind},
+    header::{GrmtoolsSectionParser, Header, HeaderErrorKind, KEY_CRATE_MAP},
 };
 
 pub type YaccGrammarResult<T> = Result<T, Vec<YaccGrammarError>>;
@@ -380,7 +380,7 @@ impl YaccParser<'_> {
         // to mark keys used. It would be less error prone if we did this at the point where keys
         // are used. However at some points where we do lookups, there are shared references to the
         // header making it difficult to get mutable access.
-        for (key_name, crate_name) in CRATE_KEY_MAP.iter() {
+        for (key_name, crate_name) in KEY_CRATE_MAP.iter() {
             if ["cfgrammar", "lrpar"].contains(crate_name) {
                 header.mark_used(&format!("{crate_name}.{key_name}"));
             }

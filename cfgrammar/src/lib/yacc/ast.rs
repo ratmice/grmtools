@@ -14,10 +14,7 @@ use super::{
 
 use crate::{
     Span,
-    header::{
-        GrmtoolsSectionParser, Header, HeaderError, HeaderErrorKind, HeaderValue, RE_CRATE_DOT,
-        Value,
-    },
+    header::{GrmtoolsSectionParser, Header, HeaderError, HeaderErrorKind, HeaderValue, Value},
     yacc::YaccOriginalActionKind,
 };
 
@@ -115,9 +112,7 @@ impl ASTWithValidityInfo {
     }
 
     /// Performs a lookup in the grmtools section for an entry with the key `crate_name.key_name` and returns it.
-    /// If the entry is found it marks the key as `used`.
-    pub fn header_value_get(&mut self, key: &str) -> Option<(Span, &Value<Span>)> {
-        self.grmtools_section.mark_used(&key.to_string());
+    pub fn header_value_get(&self, key: &str) -> Option<(Span, &Value<Span>)> {
         if let Some(HeaderValue(span, value)) = self.grmtools_section.get(key) {
             Some((*span, value))
         } else {
@@ -125,39 +120,28 @@ impl ASTWithValidityInfo {
         }
     }
 
-    /// Returns all key names given in the header specified by a `%grmtools` directive with the
-    /// `crate_prefix.` prefix for the given crate. If the `crate_prefix` is empty returns all
-    ///  unused keys regardless of crate.
-    #[doc(hidden)]
-    pub fn iter_unused_header_values(
-        &self,
-        prefixes: &HashSet<String>,
-    ) -> impl Iterator<Item = (String, Span)> {
-        self.grmtools_section
-            .unused()
-            .filter_map(move |(key_name, HeaderValue(key_span, _))| {
-                if prefixes.contains("") {
-                    return Some((key_name.clone(), *key_span));
-                }
-                if let Some(prefix_match) = RE_CRATE_DOT.find(key_name) {
-                    let key_prefix = prefix_match.as_str();
-                    if let Some(key_prefix) = key_prefix.strip_suffix('.') {
-                        if prefixes.contains(key_prefix) {
-                            Some((key_name.clone(), *key_span))
-                        } else {
-                            if prefixes.contains(key_prefix) {
-                                Some((key_name.clone(), *key_span))
-                            } else {
-                                None
-                            }
-                        }
-                    } else {
-                        None
-                    }
+    pub fn iter_prefix_keys(&self, prefix: &str) -> impl Iterator<Item = (&str, Span)> {
+        let prefix = format!("{prefix}.");
+        (&self.grmtools_section)
+            .into_iter()
+            .filter_map(move |(key, val)| {
+                let HeaderValue(span, _) = val;
+                eprintln!("prefix: {prefix:?} key: {key:?}");
+                if key.starts_with(&prefix) {
+                    Some((key.as_str(), *span))
                 } else {
                     None
                 }
             })
+    }
+
+    pub fn unrecognized_keys_for_prefix(
+        &self,
+        prefix: &str,
+        valid_keys: &HashSet<&str>,
+    ) -> impl Iterator<Item = (&str, Span)> {
+        self.iter_prefix_keys(prefix)
+            .filter(|(key, _)| !valid_keys.contains(*key))
     }
 
     #[doc(hidden)]
@@ -608,7 +592,10 @@ mod test {
         super::{AssocKind, Precedence},
         GrammarAST, Span, Symbol, YaccGrammarError, YaccGrammarErrorKind,
     };
-    use crate::test_utils::FindSpan as _;
+    use crate::{
+        header::{CFGRAMMAR_KEYS, LRPAR_KEYS},
+        test_utils::FindSpan as _,
+    };
 
     fn rule(n: &str) -> Symbol {
         Symbol::Rule(n.to_string(), Span::new(0, 0))
@@ -1047,6 +1034,13 @@ start -> () : "a" {$;;;; };
     fn test_grmtools_section_values() {
         use super::*;
         use crate::header::Value;
+        let valid_test_keys = HashSet::from_iter([
+            "test.string",
+            "test.vec",
+            "test.num",
+            "test.Negative",
+            "test.Flag",
+        ]);
         let src = r#"
 %grmtools {
    yacckind: Grmtools,
@@ -1062,7 +1056,7 @@ start -> () : "a" {$;;;; };
 %%
 start -> () : "a" { () };
 "#;
-        let mut ast_validity = ASTWithValidityInfo::from_str(src).unwrap();
+        let ast_validity = ASTWithValidityInfo::from_str(src).unwrap();
         for (key, (expected_span, expected_value)) in [
             (
                 "test.Flag".to_string(),
@@ -1109,12 +1103,12 @@ start -> () : "a" { () };
             let value = ast_validity.header_value_get(&key);
             assert_eq!(value, Some((expected_span, &expected_value)));
         }
-        let crate_prefixes = HashSet::from_iter(["test".to_string()]);
+        eprintln!("umm {src}");
         assert_eq!(
             ast_validity
-                .iter_unused_header_values(&crate_prefixes)
+                .unrecognized_keys_for_prefix("test", &valid_test_keys)
                 .collect::<Vec<_>>(),
-            vec![("test.unused".to_string(), src.find_span("test.unused"))]
+            vec![("test.unused", src.find_span("test.unused"))]
         );
         assert_eq!(
             ast_validity.header_value_get("cfgrammar.yacckind"),
@@ -1123,10 +1117,9 @@ start -> () : "a" { () };
                 &Value::Namespaced("Grmtools".to_string(), src.find_span("Grmtools"))
             ))
         );
-
         assert!(
             ast_validity
-                .iter_unused_header_values(&HashSet::from_iter(["cfgrammar".to_string()]))
+                .unrecognized_keys_for_prefix("cfgrammar", &CFGRAMMAR_KEYS)
                 .next()
                 .is_none()
         );
@@ -1141,7 +1134,7 @@ start -> () : "a" { () };
 
         assert!(
             ast_validity
-                .iter_unused_header_values(&HashSet::from_iter(["lrpar".to_string()]))
+                .unrecognized_keys_for_prefix("lrpar", &LRPAR_KEYS)
                 .next()
                 .is_none()
         );
@@ -1159,7 +1152,7 @@ start -> () : "a" { () };
 %%
 start: "a" { () };
 "#;
-        let mut ast_validity = ASTWithValidityInfo::from_str(src).unwrap();
+        let ast_validity = ASTWithValidityInfo::from_str(src).unwrap();
         assert_eq!(
             ast_validity.header_value_get("cfgrammar.yacckind"),
             Some((
@@ -1172,7 +1165,7 @@ start: "a" { () };
         );
         assert!(
             ast_validity
-                .iter_unused_header_values(&HashSet::from_iter(["cfgrammar".to_string()]))
+                .unrecognized_keys_for_prefix("cfgrammar", &CFGRAMMAR_KEYS)
                 .next()
                 .is_none()
         );
@@ -1190,7 +1183,7 @@ start: "a" { () };
 %%
 start: "a" { () };
 "#;
-        let mut ast_validity = ASTWithValidityInfo::from_str(src).unwrap();
+        let ast_validity = ASTWithValidityInfo::from_str(src).unwrap();
         assert_eq!(
             ast_validity.header_value_get("cfgrammar.yacckind"),
             Some((
@@ -1203,7 +1196,7 @@ start: "a" { () };
         );
         assert!(
             ast_validity
-                .iter_unused_header_values(&HashSet::from_iter(["cfgrammar".to_string()]))
+                .unrecognized_keys_for_prefix("cfgrammar", &CFGRAMMAR_KEYS)
                 .next()
                 .is_none()
         );
@@ -1221,7 +1214,7 @@ start: "a" { () };
 %%
 start: "a" { () };
 "#;
-        let mut ast_validity = ASTWithValidityInfo::from_str(src).unwrap();
+        let ast_validity = ASTWithValidityInfo::from_str(src).unwrap();
         assert_eq!(
             ast_validity.header_value_get("cfgrammar.yacckind"),
             Some((
@@ -1234,7 +1227,7 @@ start: "a" { () };
         );
         assert!(
             ast_validity
-                .iter_unused_header_values(&HashSet::from_iter(["cfgrammar".to_string()]))
+                .unrecognized_keys_for_prefix("cfgrammar", &CFGRAMMAR_KEYS)
                 .next()
                 .is_none()
         );

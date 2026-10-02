@@ -6,7 +6,12 @@ use crate::{
     },
 };
 use regex::{Regex, RegexBuilder};
-use std::{collections::HashMap, error::Error, fmt, sync::LazyLock};
+use std::{
+    collections::{HashMap, HashSet},
+    error::Error,
+    fmt,
+    sync::LazyLock,
+};
 
 /// An error regarding the `%grmtools` header section.
 ///
@@ -166,7 +171,7 @@ pub static RE_CRATE_DOT: LazyLock<Regex> = LazyLock::new(|| {
 static RE_DIGITS: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^[0-9]+").unwrap());
 static RE_STRING: LazyLock<Regex> = LazyLock::new(|| Regex::new(r#"^\"(\\.|[^"\\])*\""#).unwrap());
 #[doc(hidden)]
-pub static CRATE_KEY_MAP: LazyLock<HashMap<&'static str, &'static str>> = LazyLock::new(|| {
+pub static KEY_CRATE_MAP: LazyLock<HashMap<&'static str, &'static str>> = LazyLock::new(|| {
     let mut map = HashMap::new();
     let cfgrammar = ["yacckind"];
     let lrpar = ["recoverer", "test_files", "serialisation_format"];
@@ -197,6 +202,44 @@ pub static CRATE_KEY_MAP: LazyLock<HashMap<&'static str, &'static str>> = LazyLo
         map.insert(s, "regex");
     }
     map
+});
+
+#[doc(hidden)]
+pub static CFGRAMMAR_KEYS: LazyLock<HashSet<&'static str>> =
+    LazyLock::new(|| HashSet::from_iter(["cfgrammar.yacckind"]));
+
+#[doc(hidden)]
+pub static LRPAR_KEYS: LazyLock<HashSet<&'static str>> = LazyLock::new(|| {
+    HashSet::from_iter([
+        "lrpar.recoverer",
+        "lrpar.test_files",
+        "lrpar.serialisation_format",
+    ])
+});
+
+#[doc(hidden)]
+pub static LRLEX_KEYS: LazyLock<HashSet<&'static str>> = LazyLock::new(|| {
+    HashSet::from_iter([
+        "lrlex.lexerkind",
+        "lrlex.allow_wholeline_comments",
+        "lrlex.posix_escapes",
+    ])
+});
+
+#[doc(hidden)]
+pub static REGEX_KEYS: LazyLock<HashSet<&'static str>> = LazyLock::new(|| {
+    HashSet::from_iter([
+        "regex.case_insensitive",
+        "regex.dot_matches_new_line",
+        "regex.multi_line",
+        "regex.octal",
+        "regex.swap_greed",
+        "regex.ignore_whitespace",
+        "regex.unicode",
+        "regex.size_limit",
+        "regex.dfa_size_limit",
+        "regex.nest_limit",
+    ])
 });
 
 const MAGIC: &str = "%grmtools";
@@ -355,7 +398,7 @@ impl<'input> GrmtoolsSectionParser<'input> {
                     let (key, key_loc, val, j) = match self.parse_key_value(i) {
                         Ok((key, key_loc, val, pos)) => {
                             let key = if !RE_CRATE_DOT.is_match(&key) {
-                                if let Some(crate_name) = CRATE_KEY_MAP.get(key.as_str()) {
+                                if let Some(crate_name) = KEY_CRATE_MAP.get(key.as_str()) {
                                     format!("{crate_name}.{key}")
                                 } else {
                                     errs.push(HeaderError {

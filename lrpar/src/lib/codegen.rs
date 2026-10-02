@@ -14,7 +14,7 @@ use crate::{
 
 use cfgrammar::{
     RIdx, Span, Symbol,
-    header::{GrmtoolsSectionParser, Header, HeaderError, HeaderValue},
+    header::{CFGRAMMAR_KEYS, GrmtoolsSectionParser, Header, HeaderError, HeaderValue, LRPAR_KEYS},
     yacc::{
         YaccGrammar, YaccGrammarError, YaccKind, YaccOriginalActionKind, ast::ASTWithValidityInfo,
     },
@@ -459,16 +459,22 @@ where
 
     /// Checks all the keys staring with `crate_prefixes`. If any of them are `unused`, return an error.
     /// If `crate_prefixes` contains the empty string, returns an arror if any key is unused.
-    fn check_unused_header_values(
-        &self,
-        crate_prefixes: &HashSet<String>,
-    ) -> Result<(), ParserBuildEnvError<LexerTypesT>> {
-        let unused_keys = self
-            .ast_with_validity_info()
-            .iter_unused_header_values(crate_prefixes)
-            .collect::<Vec<_>>();
-        if !unused_keys.is_empty() {
-            return Err(ParserBuildEnvError::GrmtoolsSectionUnusedKeys(unused_keys));
+    fn check_unused_grmtools_header_values(&self) -> Result<(), ParserBuildEnvError<LexerTypesT>> {
+        let mut unrecognized_keys = Vec::new();
+        unrecognized_keys.extend(
+            self.ast_with_validity_info()
+                .unrecognized_keys_for_prefix("cfgrammar", &CFGRAMMAR_KEYS)
+                .map(|(s, span)| (s.to_string(), span)),
+        );
+        unrecognized_keys.extend(
+            self.ast_with_validity_info()
+                .unrecognized_keys_for_prefix("lrpar", &LRPAR_KEYS)
+                .map(|(s, span)| (s.to_string(), span)),
+        );
+        if !unrecognized_keys.is_empty() {
+            return Err(ParserBuildEnvError::GrmtoolsSectionUnusedKeys(
+                unrecognized_keys,
+            ));
         }
         Ok(())
     }
@@ -477,7 +483,7 @@ where
         &self,
         timestamp: &str,
     ) -> Result<ParserCodegen<LexerTypesT>, ParserBuildEnvError<LexerTypesT>> {
-        self.check_unused_header_values(&self.crates_to_check)?;
+        self.check_unused_grmtools_header_values()?;
         let grm = YaccGrammar::<LexerTypesT::StorageT>::new_from_ast_with_validity_info(
             &self.ast_with_validity_info,
         )?;
@@ -1295,45 +1301,15 @@ pub(crate) fn make_generics(parse_generics: Option<&str>) -> Result<Generics, Co
 
 #[cfg(test)]
 mod test {
-    use crate::test_utils::{FindSpan as _, TestLexerTypes};
-    use cfgrammar::header::{HeaderError, HeaderErrorKind};
-
     use super::*;
-    #[test]
-    fn test_unused_crate_header_entry() {
-        for crate_prefix in ["test", ""] {
-            let src = r#"
-            %grmtools{
-                yacckind: Grmtools,
-                test.foo: "test crate value",
-            }
-            %%
-            start -> () : "A" { () };
-            "#;
-            let src_env = ParserSrcEnv::<TestLexerTypes>::new(src, None);
-            let mut build_env = src_env
-                .build_env(ParserBuildEnvArgs::new().mod_name(Some("test_module")))
-                .unwrap();
-            build_env.register_header_value_prefix(crate_prefix);
-            match build_env.code_generator("timestamp") {
-                Err(ParserBuildEnvError::GrmtoolsSectionUnusedKeys(keys)) => {
-                    assert_eq!(
-                        &keys,
-                        &[("test.foo".to_string(), src.find_span("test.foo"))]
-                    )
-                }
-                Err(e) => panic!("Unexpected error result: {:?}", e),
-                _ => panic!("Unexpected Ok return value"),
-            }
-        }
-    }
-
+    use crate::test_utils::{FindSpan as _, TestLexerTypes};
+    use cfgrammar::header::HeaderErrorKind;
     #[test]
     fn test_unused_header_entry() {
         let src = r#"
         %grmtools{
             yacckind: Grmtools,
-            testfoo: "values which do not specify a crate origin should show up as unused",
+            testfoo: "non-grmtools values which do not specify a crate origin should produce errors",
         }
         %%
         start -> () : "A" { () };

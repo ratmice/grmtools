@@ -1,6 +1,8 @@
 use cfgrammar::{
     RIdx, Span, TIdx,
-    header::{GrmtoolsSectionParser, Header, HeaderError, HeaderValue, Value},
+    header::{
+        CFGRAMMAR_KEYS, GrmtoolsSectionParser, Header, HeaderError, HeaderValue, LRPAR_KEYS, Value,
+    },
     yacc::{YaccGrammar, YaccKind, YaccOriginalActionKind, ast::ASTWithValidityInfo},
 };
 use getopts::Options;
@@ -14,7 +16,6 @@ use lrtable::{Minimiser, StateTable, from_yacc};
 use num_traits::ToPrimitive as _;
 use num_traits::{AsPrimitive, PrimInt, Unsigned};
 use std::{
-    collections::HashSet,
     env,
     error::Error,
     fmt,
@@ -244,15 +245,10 @@ fn main() {
         });
     let yacc_kind = yk_arg.unwrap_or(yk_header_val.unwrap_or(YaccKind::Grmtools));
     let ast_validation = ASTWithValidityInfo::new(yacc_kind, &yacc_src);
-    // Note we don't expect to find any used lrlex keys, we want to produce an error if unused ones are found.
-    let crate_prefixes = HashSet::from_iter([
-        "cfgrammar".to_string(),
-        "lrpar".to_string(),
-        "lrlex".to_string(),
-    ]);
-    let unused_keys = ast_validation
-        .iter_unused_header_values(&crate_prefixes)
-        .collect::<Vec<_>>();
+    let mut unused_keys = Vec::new();
+    unused_keys.extend(ast_validation.unrecognized_keys_for_prefix("cfgrammar", &CFGRAMMAR_KEYS));
+    unused_keys.extend(ast_validation.unrecognized_keys_for_prefix("lrpar", &LRPAR_KEYS));
+
     if !unused_keys.is_empty() {
         eprintln!(
             "{ERROR}{}",
