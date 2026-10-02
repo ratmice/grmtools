@@ -453,7 +453,14 @@ where
 
     /// Adds the `crate_prefix` to the list of registered prefixes.
     /// The intent is that the user can check the registered keys against `ast_with_validity_info.iter_prefixes()`
-    /// Such that `assert_eq!(ast_with_validity_info.iter_prefixes(), self.registered_header_prefixes())`.
+    /// So that all the values in `ast_with_validity_info.iter_prefixes()` are also in `self.registered_header_prefixes()`
+    /// for example
+    ///
+    /// ```
+    /// let prefixes_set = ast_with_validity_info.iter_prefixes().collect::<HashSet<_>>();
+    /// let registered_set = self.registered_header_prefixes().collect<HashSet<_>>();
+    /// assert!(prefixes_set.difference(registered_set).next().is_none())
+    /// ```
     #[allow(unused)]
     pub(crate) fn register_header_prefix(
         &mut self,
