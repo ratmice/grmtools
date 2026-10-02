@@ -141,7 +141,12 @@ impl ASTWithValidityInfo {
         let mut prefixes = HashSet::new();
         for (key, _) in &self.grmtools_section {
             if let Some(prefix) = RE_CRATE_DOT.find(key) {
-                prefixes.insert(prefix.as_str().strip_suffix('.').expect("Regex ends in dot"));
+                prefixes.insert(
+                    prefix
+                        .as_str()
+                        .strip_suffix('.')
+                        .expect("Regex ends in dot"),
+                );
             }
         }
         prefixes.into_iter()

@@ -51,6 +51,7 @@ where
     StateTableError(StateTableError<LexerTypesT::StorageT>),
     YaccGrammarErrors(Vec<YaccGrammarError>),
     GrmtoolsSectionUnusedKeys(Vec<(String, Span)>),
+    DuplicatePrefixRegistrationError(String),
 }
 
 #[derive(Debug)]
@@ -138,6 +139,9 @@ where
                 let keys = keys.iter().cloned().map(|(s, _)| s).collect::<Vec<_>>();
                 format!("Unused keys in %grmtools section: {}", keys.join(", "))
             }
+            Self::DuplicatePrefixRegistrationError(prefix) => {
+                format!("Registered duplicate prefix: \"{prefix}\"")
+            }
         })
     }
 }
@@ -192,7 +196,7 @@ where
     phantom_storaget: PhantomData<LexerTypesT::StorageT>,
     mod_name: String,
     grammar_path: Option<String>,
-    crates_to_check: HashSet<String>,
+    registered_header_prefixes: HashSet<String>,
 }
 
 pub(crate) struct ParserCodegen<LexerTypesT>
@@ -382,22 +386,19 @@ where
         let recoverer = self.resolve_recoverer(&header)?;
         let serialisation_format = self.resolve_serialisation_format(&header)?;
         let mod_name = self.resolve_mod_name(&args)?;
-        let grammar_path = self.grammar_path_cache_entry;
-        let crates_to_check = vec![
-            "cfgrammar".to_string(),
-            "lrpar".to_string(),
-            "lrlex".to_string(),
-        ];
-        Ok(ParserBuildEnv {
+        let registered_header_prefixes =
+            HashSet::from_iter(["cfgrammar".to_string(), "lrpar".to_string()]);
+        let build_env = ParserBuildEnv {
             ast_with_validity_info,
             cache_args: args,
-            crates_to_check: HashSet::from_iter(crates_to_check),
+            registered_header_prefixes,
             recoverer,
             serialisation_format,
             mod_name,
-            grammar_path,
+            grammar_path: self.grammar_path_cache_entry,
             phantom_storaget: PhantomData,
-        })
+        };
+        Ok(build_env)
     }
 }
 
@@ -450,11 +451,29 @@ where
         self.ast_with_validity_info.yacc_kind()
     }
 
-    /// Causes the `code_generator()` function to check for unused entries in the grmtools section
-    /// starting for entries starting with `crate_prefix`.
-    #[allow(unused)]
-    pub(crate) fn register_header_value_prefix(&mut self, crate_prefix: &str) {
-        self.crates_to_check.insert(crate_prefix.to_string());
+    /// Adds the `crate_prefix` to the list of registered prefixes.
+    /// The intent is that the user can check the registered keys against `ast_with_validity_info.iter_prefixes()`
+    /// Such that `assert_eq!(ast_with_validity_info.iter_prefixes(), self.registered_header_prefixes())`.
+    #[expect(unused)]
+    pub(crate) fn register_header_prefix(
+        &mut self,
+        crate_prefix: &str,
+    ) -> Result<(), ParserBuildEnvError<LexerTypesT>> {
+        if !self
+            .registered_header_prefixes
+            .insert(crate_prefix.to_string())
+        {
+            Err(ParserBuildEnvError::DuplicatePrefixRegistrationError(
+                crate_prefix.to_string(),
+            ))
+        } else {
+            Ok(())
+        }
+    }
+
+    #[expect(unused)]
+    pub(crate) fn registered_header_prefixes(&self) -> impl Iterator<Item = &str> {
+        self.registered_header_prefixes.iter().map(|s| s.as_str())
     }
 
     /// Checks all the keys staring with `crate_prefixes`. If any of them are `unused`, return an error.
