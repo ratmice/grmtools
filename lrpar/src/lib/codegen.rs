@@ -1387,7 +1387,7 @@ mod test {
         }
     }
 
-        #[test]
+    #[test]
     fn test_unregistered_grmtools_prefix() {
         let src = r#"
         %grmtools{
@@ -1403,10 +1403,18 @@ mod test {
             .build_env(ParserBuildEnvArgs::new().mod_name(Some("test_module")))
             .unwrap();
         build_env.register_header_prefix("registered").unwrap();
-        let found_prefixes = build_env.ast_with_validity_info().iter_prefixes().collect::<HashSet<_>>();
-        let registered_prefixes = build_env.registered_header_prefixes().collect::<HashSet<_>>();
+        let found_prefixes = build_env
+            .ast_with_validity_info()
+            .iter_prefixes()
+            .collect::<HashSet<_>>();
+        let registered_prefixes = build_env
+            .registered_header_prefixes()
+            .collect::<HashSet<_>>();
         let expected_unregistered: HashSet<&str> = HashSet::from_iter(["unregistered"]);
-        let unregistered_prefixes: HashSet<&str> = found_prefixes.difference(&registered_prefixes).copied().collect::<HashSet<_>>();
+        let unregistered_prefixes: HashSet<&str> = found_prefixes
+            .difference(&registered_prefixes)
+            .copied()
+            .collect::<HashSet<_>>();
         assert_eq!(expected_unregistered, unregistered_prefixes);
     }
 }
