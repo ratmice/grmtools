@@ -454,7 +454,7 @@ where
     /// Adds the `crate_prefix` to the list of registered prefixes.
     /// The intent is that the user can check the registered keys against `ast_with_validity_info.iter_prefixes()`
     /// Such that `assert_eq!(ast_with_validity_info.iter_prefixes(), self.registered_header_prefixes())`.
-    #[expect(unused)]
+    #[allow(unused)]
     pub(crate) fn register_header_prefix(
         &mut self,
         crate_prefix: &str,
@@ -471,7 +471,7 @@ where
         }
     }
 
-    #[expect(unused)]
+    #[allow(unused)]
     pub(crate) fn registered_header_prefixes(&self) -> impl Iterator<Item = &str> {
         self.registered_header_prefixes.iter().map(|s| s.as_str())
     }
@@ -1378,5 +1378,28 @@ mod test {
             }
             _ => panic!("Unexpected error result"),
         }
+    }
+
+        #[test]
+    fn test_unregistered_grmtools_prefix() {
+        let src = r#"
+        %grmtools{
+            yacckind: Grmtools,
+            unregistered.key: "unknown prefix should be unregistered",
+            registered.key: "should be registered",
+        }
+        %%
+        start -> () : "A" { () };
+        "#;
+        let src_env = ParserSrcEnv::<TestLexerTypes>::new(src, None);
+        let mut build_env = src_env
+            .build_env(ParserBuildEnvArgs::new().mod_name(Some("test_module")))
+            .unwrap();
+        build_env.register_header_prefix("registered").unwrap();
+        let found_prefixes = build_env.ast_with_validity_info().iter_prefixes().collect::<HashSet<_>>();
+        let registered_prefixes = build_env.registered_header_prefixes().collect::<HashSet<_>>();
+        let expected_unregistered: HashSet<&str> = HashSet::from_iter(["unregistered"]);
+        let unregistered_prefixes: HashSet<&str> = found_prefixes.difference(&registered_prefixes).copied().collect::<HashSet<_>>();
+        assert_eq!(expected_unregistered, unregistered_prefixes);
     }
 }
