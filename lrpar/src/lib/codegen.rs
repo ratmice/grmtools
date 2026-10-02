@@ -457,8 +457,8 @@ where
     /// for example
     ///
     /// ```
-    /// let prefixes_set = ast_with_validity_info.iter_prefixes().collect::<HashSet<_>>();
-    /// let registered_set = self.registered_header_prefixes().collect<HashSet<_>>();
+    /// let prefixes_set = build_env.ast_with_validity_info().iter_prefixes().collect::<HashSet<_>>();
+    /// let registered_set = build_env.registered_header_prefixes().collect<HashSet<_>>();
     /// assert!(prefixes_set.difference(registered_set).next().is_none())
     /// ```
     #[allow(unused)]
