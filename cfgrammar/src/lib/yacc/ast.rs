@@ -14,7 +14,10 @@ use super::{
 
 use crate::{
     Span,
-    header::{GrmtoolsSectionParser, Header, HeaderError, HeaderErrorKind, HeaderValue, Value},
+    header::{
+        GrmtoolsSectionParser, Header, HeaderError, HeaderErrorKind, HeaderValue, RE_CRATE_DOT,
+        Value,
+    },
     yacc::YaccOriginalActionKind,
 };
 
@@ -126,13 +129,22 @@ impl ASTWithValidityInfo {
             .into_iter()
             .filter_map(move |(key, val)| {
                 let HeaderValue(span, _) = val;
-                eprintln!("prefix: {prefix:?} key: {key:?}");
                 if key.starts_with(&prefix) {
                     Some((key.as_str(), *span))
                 } else {
                     None
                 }
             })
+    }
+
+    pub fn iter_prefixes(&self) -> impl Iterator<Item = &str> {
+        let mut prefixes = HashSet::new();
+        for (key, _) in &self.grmtools_section {
+            if let Some(prefix) = RE_CRATE_DOT.find(key) {
+                prefixes.insert(prefix.as_str().strip_suffix('.').expect("Regex ends in dot"));
+            }
+        }
+        prefixes.into_iter()
     }
 
     #[doc(hidden)]
@@ -1094,7 +1106,6 @@ start -> () : "a" { () };
             let value = ast_validity.header_value_get(&key);
             assert_eq!(value, Some((expected_span, &expected_value)));
         }
-        eprintln!("umm {src}");
         assert_eq!(
             ast_validity
                 .iter_prefix_keys("test")
@@ -1130,6 +1141,10 @@ start -> () : "a" { () };
                 .find(|(key, _)| !LRPAR_KEYS.contains(key))
                 .is_none()
         );
+
+        let found_prefixes: HashSet<&str> = HashSet::from_iter(ast_validity.iter_prefixes());
+        let expected_prefixes: HashSet<&str> = HashSet::from_iter(["test", "cfgrammar", "lrpar"]);
+        assert_eq!(found_prefixes, expected_prefixes);
     }
 
     #[test]
