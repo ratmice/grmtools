@@ -456,9 +456,9 @@ where
     /// So that all the values in `ast_with_validity_info.iter_prefixes()` are also in `self.registered_header_prefixes()`
     /// for example
     ///
-    /// ```
-    /// let prefixes_set = build_env.ast_with_validity_info().iter_prefixes().collect::<HashSet<_>>();
-    /// let registered_set = build_env.registered_header_prefixes().collect<HashSet<_>>();
+    /// ```ignore
+    /// let prefixes_set = HashSet::from_iter(build_env.ast_with_validity_info().iter_prefixes());
+    /// let registered_set = HashSet::from_iter(build_env.registered_header_prefixes());
     /// assert!(prefixes_set.difference(registered_set).next().is_none())
     /// ```
     #[allow(unused)]
