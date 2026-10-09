@@ -123,6 +123,7 @@ impl ASTWithValidityInfo {
         }
     }
 
+    /// Returns all the keys starting with `{prefix}.` for the `prefix` from the `%grmtools` section.
     pub fn iter_prefix_keys(&self, prefix: &str) -> impl Iterator<Item = (&str, Span)> {
         let prefix = format!("{prefix}.");
         (&self.grmtools_section)
@@ -137,6 +138,7 @@ impl ASTWithValidityInfo {
             })
     }
 
+    /// Returns all of the unique prefixes for all keys in the `%grmtools` section.
     pub fn iter_prefixes(&self) -> impl Iterator<Item = &str> {
         let mut prefixes = HashSet::new();
         for (key, _) in &self.grmtools_section {
