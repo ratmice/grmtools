@@ -478,6 +478,7 @@ where
         }
     }
 
+    /// Returns the unique set of key prefixes that have been registered by calling `register_header_prefix`.
     #[allow(unused)]
     pub(crate) fn registered_header_prefixes(&self) -> impl Iterator<Item = &str> {
         self.registered_header_prefixes.iter().map(|s| s.as_str())
