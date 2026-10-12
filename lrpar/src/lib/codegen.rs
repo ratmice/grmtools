@@ -386,18 +386,19 @@ where
         let recoverer = self.resolve_recoverer(&header)?;
         let serialisation_format = self.resolve_serialisation_format(&header)?;
         let mod_name = self.resolve_mod_name(&args)?;
-        let registered_header_prefixes =
-            HashSet::from_iter(["cfgrammar".to_string(), "lrpar".to_string()]);
-        let build_env = ParserBuildEnv {
+
+        let mut build_env = ParserBuildEnv {
             ast_with_validity_info,
             cache_args: args,
-            registered_header_prefixes,
+            registered_header_prefixes: HashSet::new(),
             recoverer,
             serialisation_format,
             mod_name,
             grammar_path: self.grammar_path_cache_entry,
             phantom_storaget: PhantomData,
         };
+        build_env.register_header_prefix("cfgrammar").expect("unreachable");
+        build_env.register_header_prefix("lrpar").expect("unreachable");
         Ok(build_env)
     }
 }
@@ -461,7 +462,6 @@ where
     /// let registered_set = HashSet::from_iter(build_env.registered_header_prefixes());
     /// assert!(prefixes_set.difference(registered_set).next().is_none())
     /// ```
-    #[allow(unused)]
     pub(crate) fn register_header_prefix(
         &mut self,
         crate_prefix: &str,
