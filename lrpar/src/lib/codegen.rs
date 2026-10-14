@@ -196,7 +196,7 @@ where
     phantom_storaget: PhantomData<LexerTypesT::StorageT>,
     mod_name: String,
     grammar_path: Option<String>,
-    registered_header_prefixes: HashSet<String>,
+    registered_prefixes: HashSet<String>,
 }
 
 pub(crate) struct ParserCodegen<LexerTypesT>
@@ -390,15 +390,15 @@ where
         let mut build_env = ParserBuildEnv {
             ast_with_validity_info,
             cache_args: args,
-            registered_header_prefixes: HashSet::new(),
+            registered_prefixes: HashSet::new(),
             recoverer,
             serialisation_format,
             mod_name,
             grammar_path: self.grammar_path_cache_entry,
             phantom_storaget: PhantomData,
         };
-        build_env.register_header_prefix("cfgrammar").expect("unreachable");
-        build_env.register_header_prefix("lrpar").expect("unreachable");
+        build_env.register_prefix("cfgrammar").expect("unreachable");
+        build_env.register_prefix("lrpar").expect("unreachable");
         Ok(build_env)
     }
 }
@@ -462,14 +462,11 @@ where
     /// let registered_set = HashSet::from_iter(build_env.registered_header_prefixes());
     /// assert!(prefixes_set.difference(registered_set).next().is_none())
     /// ```
-    pub(crate) fn register_header_prefix(
+    pub(crate) fn register_prefix(
         &mut self,
         crate_prefix: &str,
     ) -> Result<(), ParserBuildEnvError<LexerTypesT>> {
-        if !self
-            .registered_header_prefixes
-            .insert(crate_prefix.to_string())
-        {
+        if !self.registered_prefixes.insert(crate_prefix.to_string()) {
             Err(ParserBuildEnvError::DuplicatePrefixRegistrationError(
                 crate_prefix.to_string(),
             ))
@@ -480,8 +477,8 @@ where
 
     /// Returns the unique set of key prefixes that have been registered by calling `register_header_prefix`.
     #[allow(unused)]
-    pub(crate) fn registered_header_prefixes(&self) -> impl Iterator<Item = &str> {
-        self.registered_header_prefixes.iter().map(|s| s.as_str())
+    pub(crate) fn registered_prefixes(&self) -> impl Iterator<Item = &str> {
+        self.registered_prefixes.iter().map(|s| s.as_str())
     }
 
     /// Checks all the keys staring with `crate_prefixes`. If any of them are `unused`, return an error.
@@ -1403,14 +1400,12 @@ mod test {
         let mut build_env = src_env
             .build_env(ParserBuildEnvArgs::new().mod_name(Some("test_module")))
             .unwrap();
-        build_env.register_header_prefix("registered").unwrap();
+        build_env.register_prefix("registered").unwrap();
         let found_prefixes = build_env
             .ast_with_validity_info()
             .iter_prefixes()
             .collect::<HashSet<_>>();
-        let registered_prefixes = build_env
-            .registered_header_prefixes()
-            .collect::<HashSet<_>>();
+        let registered_prefixes = build_env.registered_prefixes().collect::<HashSet<_>>();
         let expected_unregistered: HashSet<&str> = HashSet::from_iter(["unregistered"]);
         let unregistered_prefixes: HashSet<&str> = found_prefixes
             .difference(&registered_prefixes)
